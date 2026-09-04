@@ -62,11 +62,9 @@ local function semanticPayload(binding, eventPayload)
 	copyPublic(eventPayload, semantic)
 	copyPublic(eventPayload.payload, semantic)
 	if binding.componentType == "table" or binding.componentType == "virtual-list" then
-		-- Row activation is an in-process UI contract.  Consumers need the exact
-		-- row object (including nested sourceZone/sourceNode references) to open
-		-- their existing editor; reducing it to public scalar fields makes every
-		-- row look unavailable even though the hitbox fired correctly.
-		semantic.item = eventPayload.item
+		-- Keep pooled row objects private. Consumers resolve the stable semantic
+		-- key against their own current model, so a refresh cannot publish stale
+		-- product data or leak the framework's selection descriptor.
 		semantic.rowKey = eventPayload.key or eventPayload.rowKey
 	elseif binding.componentType == "tabs" then
 		semantic.key = selectedValue(eventPayload.value)

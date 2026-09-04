@@ -22,8 +22,8 @@ Metrics.block = Metrics.block or {
 }
 
 Metrics.table = Metrics.table or {
-	rowHeight = 32,
-	headerHeight = 30,
+	rowHeight = 40,
+	headerHeight = 34,
 	columnGap = 8,
 	cellPadding = 6,
 	rowVerticalPadding = 10,

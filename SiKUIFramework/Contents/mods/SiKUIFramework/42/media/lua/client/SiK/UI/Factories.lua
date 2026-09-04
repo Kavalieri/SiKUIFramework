@@ -125,7 +125,7 @@ local function collectionFactory(parent, props, context)
 	options.gap = props.layout and props.layout.gap
 	options.minItemWidth = props.minItemWidth
 	options.maxColumns = props.maxColumns
-	options.columns = props.columns
+	options.columns = props.layout and props.layout.columns or props.columns
 	options.exactColumns = props.exactColumns == true
 	if type(options.itemFactory) ~= "function" then return nil, "collection_item_factory_required" end
 	return SiK.UI.Collection.create(options)
@@ -483,7 +483,7 @@ local function controlFactory(parent, props, context)
                 payload = presentation.payload, icon = props.icon or props["icon-key"], enabled = presentation.enabled,
                 iconSize = props.iconSize or props["icon-size"],
                 iconFit = props.iconFit or props["icon-fit"] or (fieldAction and "fill" or nil),
-                iconPadding = props.iconPadding or props["icon-padding"] or (fieldAction and 8 or nil),
+				iconPadding = props.iconPadding or props["icon-padding"] or (fieldAction and 4 or nil),
                 items = presentation.items, selected = presentation.selected,
 		tone = presentation.tone, color = presentation.color, indicator = presentation.indicator,
 		value = presentation.value, label = presentation.label, status = presentation.status,

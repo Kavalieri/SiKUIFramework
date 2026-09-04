@@ -29,8 +29,8 @@ function Card.metrics(variant)
 			gap = 8, stateDotSize = 6, actionHeight = 32 }
 	end
 	if variant == "palette" then
-		return { minWidth = 160, minHeight = 78, iconSize = 32, padding = 8,
-			gap = 8, stateDotSize = 6, swatchHeight = 34 }
+		return { minWidth = 160, minHeight = 92, iconSize = 32, padding = 8,
+			gap = 8, stateDotSize = 6, swatchHeight = 50 }
 	end
 	return { minWidth = 160, minHeight = 64, iconSize = 32, padding = 8,
 		gap = 8, stateDotSize = 6 }
@@ -121,6 +121,11 @@ function Card.create(options)
 			end
 			self:drawRectBorder(x, metrics.padding, previewW, previewH,
 				theme.border.a or 1, theme.border.r, theme.border.g, theme.border.b)
+			if data.selected then
+				SiK.UI.Icon.drawExact(self, "sik.check.18",
+					self.width - metrics.padding - 18, metrics.padding,
+					18, 18)
+			end
 			local titleY = metrics.padding + previewH + 5
 			self:drawText(clipped(data.title, previewW, UIFont.Small), x, titleY,
 				theme.text.r, theme.text.g, theme.text.b, alpha, UIFont.Small)

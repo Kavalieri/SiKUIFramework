@@ -349,7 +349,38 @@ intrinsicHeight = function(node, layout, context, parentMode, measuring)
 	if node.type == "card" then
 		return math.max(72, minimumContentHeight(node, context) + 16)
 	end
-	if node.type == "card-collection" then return math.max(120, minimumContentHeight(node, context)) end
+	if node.type == "card-collection" then
+		local variant = node.variant or nodeProperty(node, "variant", context)
+		local cardMetrics = SiK.UI.Card.metrics(variant)
+		local columns = math.max(1, math.floor(n(layout.columns,
+			n(nodeProperty(node, "columns", context), 1))))
+		local count = #(node.children or {})
+		local items = nil
+		-- Data-bound collections (Options palettes and Addons) carry their cards
+		-- through `items`, not declarative child nodes. Measuring children alone
+		-- reserved a single row and left every later row outside the collection's
+		-- hitbox even though CardCollection had rendered it.
+		if count == 0 then
+			items = nodeProperty(node, "items", context)
+			if type(items) == "table" then count = #items end
+		end
+		local rows = math.max(1, math.ceil(count / columns))
+		local gap = math.max(0, n(layout.gap, SiK.UI.Metrics.spacing.sm))
+		local measured = cardMetrics.minHeight * rows + gap * (rows - 1)
+		if type(items) == "table" and #items > 0 then
+			measured = 0
+			for rowStart = 1, #items, columns do
+				local rowHeight = cardMetrics.minHeight
+				for index = rowStart, math.min(#items, rowStart + columns - 1) do
+					rowHeight = math.max(rowHeight, n(items[index] and items[index].height,
+						cardMetrics.minHeight))
+				end
+				if measured > 0 then measured = measured + gap end
+				measured = measured + rowHeight
+			end
+		end
+		return math.max(measured, minimumContentHeight(node, context))
+	end
 	if node.type == "block" then
 		local metrics = SiK.UI.Controls.metrics(context.profileId)
 		local title = nodeProperty(node, "title", context)

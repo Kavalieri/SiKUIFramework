@@ -73,7 +73,7 @@ function Navigation.create(options)
 	local initialDefaultExtent = (placement == "left" or placement == "right")
 		and math.max(initialMetrics.rowHeight,
 			number(options.sideExtent, initialMetrics.rowHeight * 2))
-		or initialMetrics.rowHeight
+		or initialMetrics.rowHeight + SiK.UI.Metrics.spacing.xs
 	local initialExtent = math.max(1,
 		number(options.extent or options.barSize, initialDefaultExtent))
 	local initialBar, initialContent = splitBounds(initialBounds, placement,
@@ -237,7 +237,7 @@ function Navigation.create(options)
 		local metrics = SiK.UI.Metrics.profile(bounds.w, options.profile)
 		local defaultExtent = (placement == "left" or placement == "right")
 			and math.max(metrics.rowHeight, number(options.sideExtent, metrics.rowHeight * 2))
-			or metrics.rowHeight
+			or metrics.rowHeight + SiK.UI.Metrics.spacing.xs
 		local extent = math.max(1, number(options.extent or options.barSize, defaultExtent))
 		local gap = math.max(0, number(options.contentGap, 0))
 		local bar, content = splitBounds(bounds, placement, extent, gap)

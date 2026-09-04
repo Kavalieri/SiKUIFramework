@@ -47,16 +47,26 @@ function ListInstance:_resizePool()
 		row.onMouseDown = function(target, x, y)
 			local owner = target._sikList
 			if not owner or owner.disposed or not target._sikItem then return false end
+			-- Freeze the semantic identity before any adapter can refresh/recycle
+			-- this pooled row. Both ordinary clicks and adapter-owned gestures must
+			-- complete against the object that actually received mouse-down.
+			target._sikPressedItem = target._sikItem
+			target._sikPressedIndex = target._sikIndex
+			target._sikPressedKey = target._sikKey
 			if owner.interaction and owner.interaction.onMouseDown then
-				return owner.interaction.onMouseDown(owner:_interactionContext(target, x, y)) == true
+				if owner.interaction.onMouseDown(owner:_interactionContext(target, x, y)) == true then
+					return true
+				end
 			end
-			return false
+			if target.setCapture then target:setCapture(true) end
+			return true
 		end
 		row.onMouseMove = function(target, dx, dy)
 			local owner = target._sikList
 			if not owner or owner.disposed or not target._sikItem then return false end
 			if owner.interaction and owner.interaction.onMouseMove then
-				local context = owner:_interactionContext(target)
+				local context = owner:_interactionContext(target, nil, nil,
+					target._sikPressedItem, target._sikPressedIndex, target._sikPressedKey)
 				context.dx, context.dy = dx, dy
 				return owner.interaction.onMouseMove(context) == true
 			end
@@ -66,13 +76,20 @@ function ListInstance:_resizePool()
 		row.onMouseUp = function(target, x, y)
 			local owner = target._sikList
 			if not owner or owner.disposed or not target._sikItem then return false end
+			local item = target._sikPressedItem or target._sikItem
+			local index = target._sikPressedIndex or target._sikIndex
+			local key = target._sikPressedKey or target._sikKey
 			if owner.interaction and owner.interaction.onMouseUp
-				and owner.interaction.onMouseUp(owner:_interactionContext(target, x, y)) == true then
+				and owner.interaction.onMouseUp(owner:_interactionContext(target, x, y,
+					item, index, key)) == true then
+				target._sikPressedItem, target._sikPressedIndex, target._sikPressedKey = nil, nil, nil
+				if target.setCapture then target:setCapture(false) end
 				return true
 			end
 			-- Selection refreshes the virtual pool synchronously. Snapshot the exact
 			-- row before that refresh so activation can never observe a recycled row.
-			local item, index, key = target._sikItem, target._sikIndex, target._sikKey
+			target._sikPressedItem, target._sikPressedIndex, target._sikPressedKey = nil, nil, nil
+			if target.setCapture then target:setCapture(false) end
 			owner:setSelectedKey(key)
 			if owner.onActivate then
 				owner.onActivate({
@@ -90,8 +107,14 @@ function ListInstance:_resizePool()
 		row.onMouseUpOutside = function(target, x, y)
 			local owner = target._sikList
 			if not owner or owner.disposed or not target._sikItem then return false end
+			local item = target._sikPressedItem or target._sikItem
+			local index = target._sikPressedIndex or target._sikIndex
+			local key = target._sikPressedKey or target._sikKey
+			target._sikPressedItem, target._sikPressedIndex, target._sikPressedKey = nil, nil, nil
+			if target.setCapture then target:setCapture(false) end
 			if owner.interaction and owner.interaction.onMouseUpOutside then
-				return owner.interaction.onMouseUpOutside(owner:_interactionContext(target, x, y)) == true
+				return owner.interaction.onMouseUpOutside(owner:_interactionContext(target, x, y,
+					item, index, key)) == true
 			end
 			return false
 		end
@@ -120,9 +143,10 @@ function ListInstance:_resizePool()
 	return true
 end
 
-function ListInstance:_interactionContext(row, x, y)
+function ListInstance:_interactionContext(row, x, y, item, index, key)
 	return { playerNum = self.playerNum, component = self, row = row,
-		item = row._sikItem, index = row._sikIndex, key = row._sikKey,
+		item = item or row._sikItem, index = index or row._sikIndex,
+		key = key or row._sikKey,
 		x = x, y = y }
 end
 

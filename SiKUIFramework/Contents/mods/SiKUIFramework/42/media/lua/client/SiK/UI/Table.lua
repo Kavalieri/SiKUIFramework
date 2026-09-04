@@ -119,7 +119,8 @@ local function truncate(font, value, width)
 end
 
 local function colorParts(color, fallback)
-	color = type(color) == "table" and color or fallback
+	color = type(color) == "table" and color
+		or (type(fallback) == "table" and fallback or {})
 	return numberOr(color.r or color[1], 1), numberOr(color.g or color[2], 1),
 		numberOr(color.b or color[3], 1), numberOr(color.a or color[4], 1)
 end
@@ -138,8 +139,8 @@ end
 
 local function measuredWidth(spec, font)
 	local title = spec.title or SiK.UI.resolveText(spec.titleKey, spec.key) or ""
-	if spec.sortable == true then title = title .. " v" end
 	local widest = measure(spec.font or font, title)
+	if spec.sortable == true then widest = widest + 18 end
 	for index = 1, #(spec.measureValues or {}) do
 		widest = math.max(widest, measure(spec.font or font, spec.measureValues[index]))
 	end
@@ -330,7 +331,7 @@ local function drawText(panel, text, column, y, font, color)
 end
 
 function TableInstance:_drawHeader(panel)
-	if panel.drawRect then
+	if panel.drawRect and (self.colors.tableHeader or self.colors.surface) then
 		local r, g, b, a = colorParts(self.colors.tableHeader, self.colors.surface)
 		panel:drawRect(0, 0, panel.width, panel.height, a, r, g, b)
 	end
@@ -338,8 +339,19 @@ function TableInstance:_drawHeader(panel)
 	for index = 1, #self.columnLayout do
 		local column = self.columnLayout[index]
 		local label = column.title or SiK.UI.resolveText(column.titleKey, column.key)
-		if self.sortKey == column.key then label = label .. (self.sortAsc == false and " v" or " ^") end
-		drawText(panel, label, column, y, column.spec.font or self.metrics.font, self.colors.textMuted)
+		local labelColumn = column
+		if self.sortKey == column.key then
+			labelColumn = {}
+			for key, value in pairs(column) do labelColumn[key] = value end
+			labelColumn.width = math.max(1, column.width - 18)
+			labelColumn.finish = column.x + labelColumn.width
+		end
+		drawText(panel, label, labelColumn, y, column.spec.font or self.metrics.font, self.colors.textMuted)
+		if self.sortKey == column.key then
+			SiK.UI.Icon.drawRotatedExact(panel, "sik.arrow.right.14",
+				column.finish - column.pad - 14, math.floor((panel.height - 14) / 2),
+				14, 14, self.sortAsc == false and 90 or 270)
+		end
 		if index < #self.columnLayout and panel.drawRect then
 			local r, g, b, a = colorParts(self.colors.tableRowDivider, self.colors.divider)
 			panel:drawRect(column.finish, 0, 1, panel.height - 1, a, r, g, b)
@@ -670,11 +682,13 @@ function TableInstance:_createRow(_, width, height)
 end
 
 function TableInstance:_rowContext(row, event)
-	local projected = row and row._sikProjected or nil
+	-- Virtual rows can be recycled between pointer-down and pointer-up. Prefer
+	-- the semantic snapshot carried by VirtualList for every adapter callback.
+	local projected = event and event.item or (row and row._sikProjected or nil)
 	return { playerNum = self.playerNum, component = self, row = row,
 		item = projected and projected.data or nil,
 		index = projected and projected.sourceIndex or nil,
-		visibleIndex = row and row._sikDataIndex or nil,
+		visibleIndex = event and event.index or (row and row._sikDataIndex or nil),
 		key = projected and projected.key or nil,
 		parentKey = projected and projected.parentKey or nil,
 		kind = projected and projected.semantic and projected.semantic.kind or nil,
@@ -755,11 +769,11 @@ function TableInstance:_syncGeometry()
 	-- viewport must begin below the header; using the whole Block content rect
 	-- made row one paint over the column labels and placed the table above its
 	-- own container.
-	self.scroll:update({ viewportRect = rowsRect, trackRect = trackRect,
+	self.columnLayout = Table.resolveColumns(content.w, self.columns, self.columnOptions)
+	local _, refreshed = self.scroll:update({ viewportRect = rowsRect, trackRect = trackRect,
 		trackRectSet = true, contentHeight = #self.projectedRows * self.metrics.rowHeight }, "table-geometry")
 	if self.emptyPanel then SiK.UI.Layout.apply(self.emptyPanel, rowsRect) end
-	self.columnLayout = Table.resolveColumns(content.w, self.columns, self.columnOptions)
-	if self.list then self.list:refresh() end
+	if self.list and not refreshed then self.list:refresh() end
 	return self
 end
 
