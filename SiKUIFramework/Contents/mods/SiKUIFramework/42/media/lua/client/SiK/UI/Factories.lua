@@ -477,10 +477,14 @@ local function controlFactory(parent, props, context)
                 tooltip = tooltip or presentation.label or presentation.text
                 text = ""
         end
+        local fieldAction = kind == "iconButton" and props.variant == "field-action"
         return SiK.UI.Controls.create(kind, { parent = parent, x = props.bounds.x, y = props.bounds.y,
                 w = props.bounds.w, h = props.bounds.h, text = text, tooltip = tooltip,
-		payload = presentation.payload, icon = props.icon or props["icon-key"], enabled = presentation.enabled,
-		items = presentation.items, selected = presentation.selected,
+                payload = presentation.payload, icon = props.icon or props["icon-key"], enabled = presentation.enabled,
+                iconSize = props.iconSize or props["icon-size"],
+                iconFit = props.iconFit or props["icon-fit"] or (fieldAction and "fill" or nil),
+                iconPadding = props.iconPadding or props["icon-padding"] or (fieldAction and 8 or nil),
+                items = presentation.items, selected = presentation.selected,
 		tone = presentation.tone, color = presentation.color, indicator = presentation.indicator,
 		value = presentation.value, label = presentation.label, status = presentation.status,
 		mode = presentation.mode, severity = presentation.severity, glow = presentation.glow,

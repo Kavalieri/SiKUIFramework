@@ -723,7 +723,8 @@ function TableInstance:_syncGeometry()
 	local signature = table.concat({ tostring(content.x), tostring(content.y),
 		tostring(content.w), tostring(content.h), tostring(self.block.w),
 		tostring(self.block.h), tostring(self.blockHeaderHeight),
-		tostring(self.metrics.headerHeight), tostring(self.pagerHeight) }, ":")
+		tostring(self.metrics.headerHeight), tostring(self.pagerHeight),
+		tostring(#self.projectedRows) }, ":")
 	if self._geometrySignature == signature then return self end
 	self._geometrySignature = signature
 	local padding, y = SiK.UI.Metrics.tokens(self.options.metrics).block.padding,
@@ -784,6 +785,7 @@ function TableInstance:_applyAutoHeight()
 end
 
 function TableInstance:_refreshRows(preserveOffset)
+	local previousOffset = preserveOffset == true and self.scroll:getScrollOffset() or 0
 	local projected = self:_projectRows()
 	self.projectedRows = projected
 	local chromeHeight = self.blockHeaderHeight + self.blockHeaderGap
@@ -792,7 +794,9 @@ function TableInstance:_refreshRows(preserveOffset)
 	self:_applyAutoHeight()
 	if self.pager then self.pager:setVisible(self.pageState.pageCount > 1) end
 	if self.emptyPanel then self.emptyPanel:setVisible(#projected == 0) end
-	return self.list:setData(projected, preserveOffset == true)
+	local result, reason = self.list:setData(projected, preserveOffset == true)
+	if result and preserveOffset == true then self.scroll:setScrollOffset(previousOffset) end
+	return result, reason
 end
 
 function TableInstance:setRows(rows, preserveOffset)

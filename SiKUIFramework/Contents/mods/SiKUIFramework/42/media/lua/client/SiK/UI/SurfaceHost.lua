@@ -285,6 +285,11 @@ function SurfaceHost.mount(parent, spec, options)
 			if mountReason == "parent_geometry_pending" then return self end
 			return reportError(self, "reflow_mount", mountReason)
 		end
+		local currentProfile = self._context and self._context.profile
+		if sameBounds(candidate, self._bounds)
+			and (profileId == nil or profileId == currentProfile) then
+			return finishOperation(self, "surface.host.reflow.unchanged")
+		end
 		local called, updated, updateReason = pcall(tree.reflow, tree, candidate, profileId)
 		if not called or not updated then
 			self._busy = false

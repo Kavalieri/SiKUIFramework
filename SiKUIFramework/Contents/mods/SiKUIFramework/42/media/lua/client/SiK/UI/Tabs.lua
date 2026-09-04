@@ -234,14 +234,15 @@ function Tabs.create(options)
 		local text = tooltipText(item)
 		if text == nil or text == "" then self:_hideFlyout(); return end
 		local flyout = self:_ensureFlyout(text)
-		local gap = math.max(0, number(options.tooltipGap, 4))
-		local side = options.tooltipSide
-		if side == nil then side = self.orientation == "side" and "before" or "after" end
-		local x, y = button.x or 0, button.y or 0
-		if side == "before" then x = x - flyout.width - gap
-		elseif side == "after" then x = x + button.width + gap
-		elseif side == "above" then y = y - flyout.height - gap
-		else y = y + button.height + gap end
+		local gap = math.max(0, number(options.tooltipGap, 8))
+		local parentX = self.parent.getAbsoluteX and self.parent:getAbsoluteX() or self.parent.x or 0
+		local parentY = self.parent.getAbsoluteY and self.parent:getAbsoluteY() or self.parent.y or 0
+		local pointerX = (type(getMouseX) == "function" and getMouseX() or parentX) - parentX
+		local pointerY = (type(getMouseY) == "function" and getMouseY() or parentY) - parentY
+		local x, y = pointerX + gap, pointerY + gap
+		if x + flyout.width > self.parent.width then x = pointerX - flyout.width - gap end
+		x = math.max(0, math.min(x, math.max(0, self.parent.width - flyout.width)))
+		y = math.max(0, math.min(y, math.max(0, self.parent.height - flyout.height)))
 		flyout:setX(x); flyout:setY(y); flyout:setVisible(true); flyout:bringToTop()
 		self.flyoutItem = item
 	end
@@ -305,6 +306,14 @@ function Tabs.create(options)
 					end
 				end,
 			})
+			-- Flyout mode is the sole tooltip owner. Clear any native tooltip state
+			-- retained by a recycled/custom control to prevent duplicate labels.
+			if options.tooltipMode == "flyout" then
+				if button._sikTooltipHandle and button._sikTooltipHandle.dispose then
+					button._sikTooltipHandle:dispose()
+				end
+				button._sikTooltipHandle, button.tooltip = nil, nil
+			end
 			decorateTabButton(button, item, self.placement, options)
 			button._sikTabKey = key
 			if options.tooltipMode == "flyout" then self:_bindFlyout(button, item) end

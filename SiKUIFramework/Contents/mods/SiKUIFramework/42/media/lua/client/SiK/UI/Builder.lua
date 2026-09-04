@@ -96,6 +96,17 @@ local function sameValue(left, right, seen)
 	return true
 end
 
+local function samePropsExceptBounds(left, right)
+	left, right = left or {}, right or {}
+	for key, value in pairs(left) do
+		if key ~= "bounds" and not sameValue(value, right[key]) then return false end
+	end
+	for key, value in pairs(right) do
+		if key ~= "bounds" and left[key] == nil and value ~= nil then return false end
+	end
+	return true
+end
+
 local function indexedValues(values, field, transform)
 	local result = {}
 	for index = 1, #(values or {}) do
@@ -814,18 +825,21 @@ local function buildTabs(handle, node, context, tree)
 	end
 end
 
-local function cardItem(child, context, rect)
-        local props, err = resolvedProps(child, context, rect)
-        if not props then error(err, 2) end
-        local actions = props.capabilities["card.actions"]
-        return { title = props.title, text = props.text, icon = props.icon,
-                value = props.value, description = props.description,
-                status = props.status or props.statusLabel,
-                statusTone = props.statusTone or props.tone,
-                tooltip = props.tooltip, locked = props.locked,
-                payload = props.data, height = rect.h,
-                contentHeight = props.contentHeight or rect.h,
-                action = actions and type(actions.actions) == "table" and actions.actions[1] or nil }
+local function cardItem(child, context, rect, actionTarget)
+	local props, err = resolvedProps(child, context, rect)
+	if not props then error(err, 2) end
+	return { title = props.title, text = props.text, icon = props.icon,
+		value = props.value, description = props.description,
+		status = props.status or props.statusLabel,
+		statusTone = props.statusTone or props.tone,
+		requirement = props.requirement, actionLabel = props.actionLabel,
+		swatches = props.swatches, selected = props.selected == true,
+		tooltip = props.tooltip, locked = props.locked,
+		payload = props.data, height = rect.h,
+		contentHeight = props.contentHeight or rect.h,
+		action = actionTarget and function(payload)
+			return SiK.UI.Bindings.emit(actionTarget, "activate", payload)
+		end or nil }
 end
 
 local function buildCardCollection(parent, node, context, tree, bounds, factory, placement)
@@ -833,11 +847,21 @@ local function buildCardCollection(parent, node, context, tree, bounds, factory,
 	if not props then error(err, 2) end
 	props.actionTarget = {}
 	bindActions(props.actionTarget, node, context, tree)
-	local area = bounds
-        local rects = resolveChildGeometry(node, area, context)
+	-- CardCollection is itself positioned at bounds. Its cards are children of
+	-- that collection and therefore consume collection-local coordinates.
+	-- Reusing the parent-space x/y here applied the offset twice and let cards
+	-- escape the frame (most visibly in Options palettes and Addons).
+	local area = { x = 0, y = 0, w = bounds.w, h = bounds.h }
+	local rects = resolveChildGeometry(node, area, context)
+	local cardTargets = {}
 	if #(node.children or {}) > 0 then
 		props.items = {}
-		for index = 1, #node.children do props.items[index] = cardItem(node.children[index], context, rects[index]) end
+		for index = 1, #node.children do
+			local childTarget = {}
+			cardTargets[index] = childTarget
+			bindActions(childTarget, node.children[index], context, tree)
+			props.items[index] = cardItem(node.children[index], context, rects[index], childTarget)
+		end
 	end
 	local adoption = tree.adoptions[node.id]
 	local handle, factoryErr
@@ -845,10 +869,10 @@ local function buildCardCollection(parent, node, context, tree, bounds, factory,
 		handle = adoption.handle
 		local temporary = { handle = handle, node = node, props = props,
 			contract = factoryContracts[node.type] or {} }
-                local captured = captureRecord(temporary)
-                tree.adoptionSnapshots[node.id] = { record = temporary,
-                        state = captured.state, bounds = handleBounds(handle),
-                        actionTarget = handle.actionTarget }
+		local captured = captureRecord(temporary)
+		tree.adoptionSnapshots[node.id] = { record = temporary,
+			state = captured.state, bounds = handleBounds(handle),
+			actionTarget = handle.actionTarget }
                 local applied, applyErr = applyUpdate(temporary, props, context)
                 if applied then applied, applyErr = preserveRecord(temporary, captured.state) end
                 if not applied then error("SiK UI adoption failed for " .. node.id .. ": " .. tostring(applyErr), 2) end
@@ -863,11 +887,10 @@ local function buildCardCollection(parent, node, context, tree, bounds, factory,
 	for index = 1, #node.children do
 		local child, card = node.children[index], handle.cards and handle.cards[index]
 		if not card then error("SiK UI declarative card unavailable: " .. child.id, 2) end
-		card.actionTarget = {}
-		bindActions(card.actionTarget, child, context, tree)
-		recordHandle(card, child, tree, cardItem(child, context, rects[index]), false,
+		card.actionTarget = cardTargets[index]
+		recordHandle(card, child, tree, cardItem(child, context, rects[index], cardTargets[index]), false,
 			{ kind = "collection-card", parentId = node.id, index = index })
-        end
+	end
 	return handle
 end
 
@@ -983,12 +1006,14 @@ local function updateTree(tree, nextContext)
 				return nil, "surface_update_failed:" .. record.node.id .. ":" .. tostring(propsReason)
 			end
 			props.actionTarget = record.props.actionTarget
-			local changed = not sameValue(record.props, props)
+			local geometryChanged = not sameValue(record.props.bounds, props.bounds)
+			local contentChanged = not samePropsExceptBounds(record.props, props)
+			local changed = geometryChanged or contentChanged
 			local updated, updateReason = true, nil
 			if changed then
 				snapshots[index] = captureRecord(record)
 				snapshots[index].bounds = handleBounds(record.handle)
-				updated, updateReason = applyUpdate(record, props, context)
+				if contentChanged then updated, updateReason = applyUpdate(record, props, context) end
 				if updated then updated, updateReason = applyReflow(record, bounds, context) end
 				if updated then updated, updateReason = applyVisibility(record.handle, props.visible ~= false) end
 				if updated then updated, updateReason = preserveRecord(record, snapshots[index].state) end

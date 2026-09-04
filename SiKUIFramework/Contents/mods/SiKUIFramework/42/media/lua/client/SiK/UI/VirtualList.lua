@@ -70,14 +70,17 @@ function ListInstance:_resizePool()
 				and owner.interaction.onMouseUp(owner:_interactionContext(target, x, y)) == true then
 				return true
 			end
-			owner:setSelectedKey(target._sikKey)
+			-- Selection refreshes the virtual pool synchronously. Snapshot the exact
+			-- row before that refresh so activation can never observe a recycled row.
+			local item, index, key = target._sikItem, target._sikIndex, target._sikKey
+			owner:setSelectedKey(key)
 			if owner.onActivate then
 				owner.onActivate({
 					playerNum = owner.playerNum,
 					component = owner,
-					item = target._sikItem,
-					index = target._sikIndex,
-					key = target._sikKey,
+					item = item,
+					index = index,
+					key = key,
 					x = x,
 					y = y,
 				})
