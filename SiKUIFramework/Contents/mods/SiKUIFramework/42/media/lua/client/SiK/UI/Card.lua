@@ -18,15 +18,15 @@ end
 function Card.metrics(variant)
 	if variant == "summary" then
 		return { minWidth = 140, minHeight = 72, iconSize = 32, padding = 8,
-			gap = 8, stateDotSize = 6 }
+			gap = 8, stateDotSize = 6, headerHeight = 24 }
 	end
 	if variant == "feature" then
 		return { minWidth = 260, minHeight = 164, iconSize = 88, padding = 12,
-			gap = 12, stateDotSize = 7, actionHeight = 32 }
+			gap = 12, stateDotSize = 7, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "process" then
 		return { minWidth = 260, minHeight = 148, iconSize = 40, padding = 8,
-			gap = 8, stateDotSize = 6, actionHeight = 32 }
+			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "palette" then
 		local padding, swatchHeight, titleGap = 8, 50, 5
@@ -34,10 +34,10 @@ function Card.metrics(variant)
 			minHeight = math.max(92, padding * 2 + swatchHeight + titleGap
 				+ fontHeight(UIFont.Small)),
 			iconSize = 32, padding = padding, gap = 8, stateDotSize = 6,
-			swatchHeight = swatchHeight, titleGap = titleGap }
+			swatchHeight = swatchHeight, titleGap = titleGap, headerHeight = 24 }
 	end
 	return { minWidth = 160, minHeight = 64, iconSize = 32, padding = 8,
-		gap = 8, stateDotSize = 6 }
+		gap = 8, stateDotSize = 6, headerHeight = 24 }
 end
 
 function Card.summaryMetrics() return Card.metrics("summary") end
@@ -58,11 +58,21 @@ function Card.create(options)
                 w = options.w or options.width or metrics.minWidth,
                 h = options.h or options.height or metrics.minHeight,
 		controlId = "card", playerNum = options.playerNum,
-		tooltip = options.tooltip, tooltipPlacement = options.tooltipPlacement,
 	})
 	local instance = { panel = panel, options = options, variant = variant,
 		payload = options.payload, data = {}, actions = options.actions or {} }
 	panel._sikUiControl, panel._sikCardInstance = "card", instance
+	local infoSpec = type(options.info) == "table" and options.info or {}
+	instance.header = SiK.UI.Controls.blockHeader(panel, {
+		x = metrics.padding, y = metrics.padding,
+		w = math.max(1, panel.width - metrics.padding * 2),
+		h = metrics.headerHeight,
+		text = options.title or options.text or "",
+		tooltip = infoSpec.tooltip or options.tooltip or options.title or options.text or "",
+		info = infoSpec,
+		profile = options.profile, theme = options.theme,
+		playerNum = options.playerNum,
+	})
 
 	function instance:setData(data)
 		data = type(data) == "table" and data or {}
@@ -82,6 +92,16 @@ function Card.create(options)
 		if self.actionButton then
 			self.actionButton.title = self.data.actionLabel
 			self.actionButton:setEnabled(not self.data.locked)
+		end
+		if self.header then
+			self.header:setText(self.data.title)
+			if self.header.info then
+				SiK.UI.Controls.setTooltip(self.header.info,
+					infoSpec.tooltip or options.tooltip or self.data.description or self.data.title,
+					{ playerNum = options.playerNum, profile = "informational",
+						placement = options.tooltipPlacement,
+						channel = "informational-help" })
+			end
 		end
 		if data.payload ~= nil then self.payload = data.payload end
 		return self
@@ -112,7 +132,8 @@ function Card.create(options)
 		local alpha = data.locked and 0.45 or 1
 		local x = metrics.padding
 		local actionReserve = instance.actionButton and (metrics.actionHeight + metrics.gap) or 0
-		local bodyHeight = math.max(1, self.height - actionReserve)
+		local bodyTop = metrics.padding + metrics.headerHeight + metrics.gap
+		local bodyHeight = math.max(1, self.height - bodyTop - metrics.padding - actionReserve)
 		if type(data.swatches) == "table" and #data.swatches > 0 then
 			local previewW = math.max(1, self.width - metrics.padding * 2)
 			local previewH = metrics.swatchHeight or 34
@@ -120,23 +141,20 @@ function Card.create(options)
 			for index = 1, #data.swatches do
 				local swatch = SiK.UI.Theme.normalizeColor(data.swatches[index], theme.surfaceAlt)
 				local drawW = index == #data.swatches and previewW - swatchW * (index - 1) or swatchW
-				self:drawRect(x + (index - 1) * swatchW, metrics.padding, drawW, previewH,
+				self:drawRect(x + (index - 1) * swatchW, bodyTop, drawW, previewH,
 					swatch.a or 1, swatch.r, swatch.g, swatch.b)
 			end
-			self:drawRectBorder(x, metrics.padding, previewW, previewH,
+			self:drawRectBorder(x, bodyTop, previewW, previewH,
 				theme.border.a or 1, theme.border.r, theme.border.g, theme.border.b)
 			if data.selected then
 				SiK.UI.Icon.drawExact(self, "sik.check.18",
-					self.width - metrics.padding - 18, metrics.padding,
+					self.width - metrics.padding - 18, bodyTop,
 					18, 18)
 			end
-			local titleY = metrics.padding + previewH + (metrics.titleGap or 5)
-			self:drawText(clipped(data.title, previewW, UIFont.Small), x, titleY,
-				theme.text.r, theme.text.g, theme.text.b, alpha, UIFont.Small)
 			return
 		end
 		if data.icon then
-			local iconY = math.max(metrics.padding,
+			local iconY = bodyTop + math.max(0,
 				math.floor((bodyHeight - metrics.iconSize) / 2))
 			SiK.UI.Icon.draw(self, data.icon, x, iconY, metrics.iconSize, metrics.iconSize,
 				{ alpha = alpha })
@@ -144,21 +162,25 @@ function Card.create(options)
 		end
 		local width = math.max(1, self.width - x - metrics.padding)
 		local line = fontHeight(UIFont.Small)
-		local rows = 1 + (data.value ~= "" and 1 or 0)
+		local rows = (data.value ~= "" and 1 or 0)
 			+ (data.description ~= "" and 1 or 0) + (data.requirement ~= "" and 1 or 0)
 			+ (data.status ~= "" and 1 or 0)
-		local y = math.max(metrics.padding, math.floor((bodyHeight - rows * line - (rows - 1) * 2) / 2))
-		local titleFont = (variant == "feature" or variant == "process") and UIFont.Medium or UIFont.Small
-		self:drawText(clipped(data.title, width, titleFont), x, y,
-			theme.text.r, theme.text.g, theme.text.b, alpha, titleFont)
-		if data.value ~= "" then y = y + line + 2; self:drawText(clipped(data.value, width, UIFont.Small), x, y,
+		local textHeight = rows > 0 and rows * line + math.max(0, rows - 1) * 2 or 0
+		local y = bodyTop + math.max(0, math.floor((bodyHeight - textHeight) / 2))
+		local drewLine = false
+		local function nextLineY()
+			if drewLine then y = y + line + 2 end
+			drewLine = true
+			return y
+		end
+		if data.value ~= "" then self:drawText(clipped(data.value, width, UIFont.Small), x, nextLineY(),
 			theme.accent.r, theme.accent.g, theme.accent.b, alpha, UIFont.Small) end
-		if data.description ~= "" then y = y + line + 2; self:drawText(clipped(data.description, width, UIFont.Small), x, y,
+		if data.description ~= "" then self:drawText(clipped(data.description, width, UIFont.Small), x, nextLineY(),
 			theme.textMuted.r, theme.textMuted.g, theme.textMuted.b, alpha, UIFont.Small) end
-		if data.requirement ~= "" then y = y + line + 2; self:drawText(clipped(data.requirement, width, UIFont.Small), x, y,
+		if data.requirement ~= "" then self:drawText(clipped(data.requirement, width, UIFont.Small), x, nextLineY(),
 			theme.warning.r, theme.warning.g, theme.warning.b, alpha, UIFont.Small) end
 		if data.status ~= "" then
-			y = y + line + 2
+			y = nextLineY()
 			local color = SiK.UI.Theme.color(data.statusTone, options.theme)
 			self:drawRect(x, y + math.floor((line - metrics.stateDotSize) / 2),
 				metrics.stateDotSize, metrics.stateDotSize, alpha, color.r, color.g, color.b)
@@ -204,12 +226,21 @@ function Card.create(options)
 				h = metrics.actionHeight,
 			})
 		end
+		if self.header then
+			SiK.UI.Layout.apply(self.header, {
+				x = metrics.padding, y = metrics.padding,
+				w = math.max(1, self.panel.width - metrics.padding * 2),
+				h = metrics.headerHeight,
+			})
+			self.header:reflow(math.max(1, self.panel.width - metrics.padding * 2))
+		end
 		return self
 	end
 	function instance:dispose()
 		if self.disposed then return false end
 		self.disposed = true
 		local target = self.panel
+		if self.header then self.header:dispose(); self.header = nil end
 		if target and target.dispose then target:dispose() end
 		if target then target._sikCardInstance = nil end
 		self.panel = nil; return true

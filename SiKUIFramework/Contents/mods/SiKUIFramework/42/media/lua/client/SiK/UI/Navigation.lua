@@ -6,8 +6,8 @@ require "SiK/UI/Layout"
 require "SiK/UI/Diagnostics"
 
 -- Internal navigation capability used by Container. It owns the tab selector
--- and one stable Container host per destination. Product code never creates
--- rails or manually toggles content panels.
+-- and one common content Container. Destinations are selectable child surfaces
+-- inside that shared area; a tab never creates or owns another content host.
 local Navigation = SiK.UI.Navigation or {}
 SiK.UI.Namespace.define("Navigation", Navigation)
 
@@ -65,7 +65,8 @@ function Navigation.create(options)
 		placement = "top"
 	end
 	local instance = { parent = options.parent, options = options, placement = placement,
-		hosts = {}, hostOnlyKeys = {}, contentHosts = {}, surfaceHosts = {}, items = {} }
+		hosts = {}, hostOnlyKeys = {}, contentHosts = {}, surfaceHosts = {}, items = {},
+		mountedContents = {} }
 	local initialBounds = SiK.UI.Layout.resolveRect(options.bounds, {
 		x = 0, y = 0, w = options.parent.width or 1, h = options.parent.height or 1,
 	}, 1)
@@ -83,16 +84,21 @@ function Navigation.create(options)
 	instance.contentBounds = SiK.UI.Layout.resolveRect(initialContent, initialBounds, 1)
 
 	function instance:_createHost(padding)
+		if self.contentHost then return self.contentHost end
 		local bounds = self.contentBounds
 		if not bounds or bounds.w <= 1 or bounds.h <= 1 then
 			return nil, "navigation_content_geometry_unresolved"
 		end
+		local contentPadding = padding
+		if contentPadding == nil then contentPadding = options.contentPadding end
+		if contentPadding == nil then contentPadding = 0 end
 		local host, err = SiK.UI.Container.create({ parent = self.parent,
 			x = bounds.x, y = bounds.y, w = bounds.w, h = bounds.h,
-			bounds = bounds, padding = padding or 0,
+			bounds = bounds, padding = contentPadding,
 			playerNum = options.playerNum, controlId = "navigation-content" })
 		if not host then return nil, err end
-		host.panel:setVisible(false)
+		host.panel:setVisible(true)
+		self.contentHost = host
 		return host
 	end
 
@@ -108,24 +114,15 @@ function Navigation.create(options)
 
 	function instance:setItems(items)
 		if self.disposed then return nil, "disposed" end
-		local previousHosts = self.hosts
 		self.hosts, self.contentHosts, self.surfaceHosts, self.items = {}, {}, {}, {}
+		local host, hostError = self:_createHost(options.contentPadding)
+		if not host then return nil, hostError end
 		for key in pairs(self.hostOnlyKeys) do
-			if previousHosts[key] then
-				self.hosts[key], previousHosts[key] = previousHosts[key], nil
-			end
+			self.hosts[key] = host
 		end
 		for index = 1, #(items or {}) do
 			local source = items[index]
 			local key = source.key or source.id or source.value or tostring(index)
-			local host = previousHosts[key]
-			if host then previousHosts[key] = nil
-			else
-				local err
-				host, err = self:_createHost(source.padding)
-				if not host then return nil, err end
-			end
-			host.panel:setVisible(false)
 			self.hosts[key] = host
 			if source.contentId then self.contentHosts[source.contentId] = host.panel end
 			if source.surfaceRef then self.surfaceHosts[source.surfaceRef] = host.panel end
@@ -134,11 +131,13 @@ function Navigation.create(options)
 				icon = source.icon, iconOnly = source.iconOnly,
 				tooltip = source.tooltip, badge = source.badge,
 				enabled = source.enabled ~= false and source.disabled ~= true,
-				content = host.panel, payload = source.payload or source.value,
+				payload = source.payload or source.value,
 				pin = source.pin, pinned = source.pinned,
 			}
 		end
-		for _, host in pairs(previousHosts) do host:dispose() end
+		for key, panel in pairs(self.mountedContents) do
+			if not self.hosts[key] and panel.setVisible then panel:setVisible(false) end
+		end
 		if self.tabs then self.tabs:setItems(self.items) end
 		-- During construction the final bounds already exist before Tabs does.
 		-- Reflow only once the bar has been created; its constructor receives
@@ -165,11 +164,9 @@ function Navigation.create(options)
 		end
 		if not isChildOf(host.panel, panel) then host.panel:addChild(panel) end
 		panel.parent = host.panel
-		SiK.UI.Layout.apply(panel, SiK.UI.Layout.resolveRect({
-			x = 0, y = 0, w = host.panel.width, h = host.panel.height,
-		}, nil, 1))
-                panel:setVisible(self.activeKey == key)
-                host.mountedContent = panel
+		SiK.UI.Layout.apply(panel, host:contentRect())
+		panel:setVisible(self.activeKey == key)
+		self.mountedContents[key] = panel
 		if self.activeKey == key and SiK.UI.Diagnostics and SiK.UI.Diagnostics.enabled() then
 			SiK.UI.Diagnostics.inspectMount(self, key)
 		end
@@ -183,24 +180,16 @@ function Navigation.create(options)
 	function instance:setActive(key, emit)
 		if self.disposed then return nil, "disposed" end
 		if not self.hosts[key] then return nil, "unknown_destination" end
-		for hostKey, host in pairs(self.hosts) do
-			local active = hostKey == key
-			host.panel:setVisible(active)
-			-- mountContent() must make an inactive destination safe at adoption
-			-- time, but the destination owns visibility afterwards. Previously we
-			-- only re-enabled the host here: its mounted product panel remained
-			-- explicitly hidden forever, producing a valid Window with an empty
-			-- body and no runtime error when the destination was first activated.
-			if host.mountedContent and host.mountedContent.setVisible then
-				host.mountedContent:setVisible(active)
-			end
-                end
-                self.activeKey = key
-		local activeHost = self.hosts[key]
+		local previousKey = self.activeKey
+		for contentKey, panel in pairs(self.mountedContents) do
+			if panel.setVisible then panel:setVisible(contentKey == key) end
+		end
+		self.activeKey = key
+		local activePanel = self.mountedContents[key]
 		-- A destination is allowed to become active before its product content
 		-- is adopted. Diagnose only live mounts here; mountContent performs the
 		-- first complete inspection immediately after adoption.
-		if activeHost and activeHost.mountedContent
+		if activePanel and previousKey ~= key
 				and SiK.UI.Diagnostics and SiK.UI.Diagnostics.enabled() then
                         SiK.UI.Diagnostics.inspectMount(self, key)
                 end
@@ -226,8 +215,12 @@ function Navigation.create(options)
 	--- Returns a detached, fully numeric content rectangle. Product consumers
 	--- never inspect Navigation's mutable internal state directly.
 	function instance:getContentBounds(fallback)
-		return SiK.UI.Layout.resolveRect(self.contentBounds,
+		local outer = SiK.UI.Layout.resolveRect(self.contentBounds,
 			fallback or self.bounds or options.bounds, 1)
+		local inner = self.contentHost and self.contentHost:contentRect()
+			or { x = 0, y = 0, w = outer.w, h = outer.h }
+		return { x = outer.x + inner.x, y = outer.y + inner.y,
+			w = inner.w, h = inner.h }
 	end
 
 	function instance:reflow(bounds)
@@ -250,12 +243,12 @@ function Navigation.create(options)
 			for _, entry in pairs(self.tabs.byKey or {}) do entry.button:setVisible(false) end
 			if self.tabs.separator then self.tabs.separator:setVisible(false) end
 		end
-		for _, host in pairs(self.hosts) do
+		local host = self.contentHost
+		if host then
 			host:reflow(content)
-			if host.mountedContent then
-				SiK.UI.Layout.apply(host.mountedContent, SiK.UI.Layout.resolveRect({
-					x = 0, y = 0, w = host.panel.width, h = host.panel.height,
-				}, nil, 1))
+			local inner = host:contentRect()
+			for _, panel in pairs(self.mountedContents) do
+				SiK.UI.Layout.apply(panel, inner)
 			end
 		end
 		return self
@@ -265,8 +258,9 @@ function Navigation.create(options)
 		if self.disposed then return false end
 		self.disposed = true
 		if self.tabs then self.tabs:dispose(); self.tabs = nil end
-		for _, host in pairs(self.hosts) do host:dispose() end
+		if self.contentHost then self.contentHost:dispose(); self.contentHost = nil end
 		self.hosts, self.hostOnlyKeys, self.contentHosts, self.surfaceHosts, self.items = {}, {}, {}, {}, {}
+		self.mountedContents = {}
 		self.parent = nil
 		return true
 	end

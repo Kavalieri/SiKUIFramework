@@ -275,11 +275,14 @@ function Block.create(options)
 	local w = math.max(0, tonumber(options.w or options.width) or 0)
 	local h = math.max(0, tonumber(options.h or options.height) or 0)
 	local variant = options.variant or "standard"
-	local background, border = options.background, options.border
+	local background, border = false, false
 	if variant ~= "plain" and variant ~= "transparent" then
 		local theme = SiK.UI.Theme.tokens(options.theme)
-		if background == nil then background = theme.surface end
-		if border == nil then border = theme.border end
+		-- SiK UI supplies the canonical result by default. The reusable framework
+		-- still accepts deliberate overrides; products that want the standard
+		-- simply omit them and cannot drift between otherwise equivalent blocks.
+		background = options.background or theme.surface
+		border = options.border or theme.border
 	end
 	local container, err = SiK.UI.Container.create({ parent = options.parent,
 		x = x, y = y, w = w, h = h, padding = 0,

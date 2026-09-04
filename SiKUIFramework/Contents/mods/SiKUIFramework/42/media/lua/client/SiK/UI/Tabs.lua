@@ -347,7 +347,10 @@ function Tabs.create(options)
 		self.bounds = { x = bounds.x, y = bounds.y, w = bounds.w, h = bounds.h }
 		local count = #self.buttons
 		if count == 0 then return self end
-		local gap = math.max(0, number(options.gap or options.itemGap, 0))
+		local profile = SiK.UI.Metrics.profile(bounds.w, options.profile)
+		local defaultGap = self.orientation == "side"
+			and number(profile.window and profile.window.railGap, 0) or 0
+		local gap = math.max(0, number(options.gap or options.itemGap, defaultGap))
 		local padding = math.max(0, number(options.padding, 0))
 		local horizontal = self.orientation ~= "side"
 		local mainStart, mainEnd = {}, {}

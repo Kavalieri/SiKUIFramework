@@ -259,20 +259,16 @@ local function blockFactory(parent, props, context)
 	-- visual contract.  Rebuilding a second header here used to discard the
 	-- variant/frame/padding and reserve the title twice, which made every
 	-- product surface look like an unframed vanilla panel.
-	options.variant = props.variant
-	options.background = props.background
-	options.border = props.border
-	options.title = props.title
-	options.tooltip = props.help or props.tooltip
+		-- Declarative product surfaces consume the SiK UI standard. Visual and
+		-- spacing overrides remain available only to direct framework consumers;
+		-- generated product descriptors cannot compensate geometry per screen.
+		options.variant = "standard"
+		options.title = props.title
+		options.tooltip = props.help or props.tooltip
 	options.info = options.tooltip and headerCapability["info-visible"] ~= false
 		and { tooltip = options.tooltip } or nil
 	options.actions = headerActions
-	options.paddingX = props.paddingX or props.padding
-	options.paddingY = props.paddingY or props.padding
-	options.headerHeight = props.headerHeight
-	options.headerGap = props.headerGap
-	options.reservedBottom = props.reservedBottom
-	options.scrollable = props.scrollable == true
+		options.scrollable = props.scrollable == true
 	options.fill = props.variant == "fill" or props.fill == true
 	options.contentHeight = n(props.contentHeight, 0)
 	options.onActivate = function(payload) return emit(props, "activate", payload) end
@@ -327,6 +323,7 @@ end
 local function cardFactory(parent, props, context)
 	local options = boundsOptions(parent, props, context)
 	options.title, options.payload = props.title, props.data
+	options.tooltip = props.help or props.tooltip
 	options.contentHeight = n(props.contentHeight, options.h)
 	local actions = props.capabilities["card.actions"]
 	if actions and type(actions.actions) == "table" then

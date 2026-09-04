@@ -49,16 +49,28 @@ local function createTableRoot(options)
 		w = options.w or options.width or 0,
 		h = options.h or options.height or 0,
 		contentHeight = 0, listeners = {}, disposed = false,
+		metrics = SiK.UI.Metrics.tokens(options.metrics),
 	}
 	root.panel._sikUiComponent = "table"
 
 	function root:_sync(reasonId)
 		if self.disposed then return end
 		SiK.UI.Layout.apply(self.panel, { x = self.x, y = self.y, w = self.w, h = self.h })
-		local base = SiK.UI.Metrics.blockRects(self.w, self.h, false, 0, 0)
-		local overflow = self.contentHeight > base.h
-		self.contentRect, self.trackRect = SiK.UI.Metrics.blockRects(
-			self.w, self.h, overflow, 0, 0)
+		-- The parent Block has already reserved every outer margin.  Table is a
+		-- terminal widget: its local origin is the exact rectangle assigned by
+		-- that parent and it may reserve only its own scrollbar on the right.
+		-- Reusing Metrics.blockRects() here created a second 8 px inset and a
+		-- second visual geometry unrelated to the containing Block.
+		local overflow = self.contentHeight > self.h
+		local barWidth = math.max(0, numberOr(self.metrics.block.scrollBarWidth, 14))
+		local barGap = math.max(0, numberOr(self.metrics.block.scrollGap, 10))
+		local gutter = overflow and (barGap + barWidth) or 0
+		self.contentRect = { x = 0, y = 0,
+			w = math.max(0, self.w - gutter), h = self.h }
+		self.trackRect = overflow and {
+			x = math.max(0, self.w - barWidth), y = 0,
+			w = barWidth, h = self.h,
+		} or nil
 		for index = 1, #self.listeners do self.listeners[index](reasonId or "sync") end
 	end
 
@@ -852,7 +864,7 @@ function TableInstance:_syncGeometry()
 		tostring(#self.projectedRows) }, ":")
 	if self._geometrySignature == signature then return self end
 	self._geometrySignature = signature
-	local padding, y = self.paddingY, self.paddingY
+	local y = content.y
 	if self.blockHeader then
 		SiK.UI.Layout.apply(self.blockHeader, { x = content.x, y = y,
 			w = content.w, h = self.blockHeaderHeight })
@@ -861,12 +873,12 @@ function TableInstance:_syncGeometry()
 	end
 	SiK.UI.Layout.apply(self.header, { x = content.x, y = y, w = content.w, h = self.metrics.headerHeight })
 	local rowsY = y + self.metrics.headerHeight
-	local rowsBottom = self.root.h - padding
+	local rowsBottom = content.y + content.h
 	if visiblePagerHeight > 0 then
-		SiK.UI.Layout.apply(self.pager, { x = content.x, y = self.root.h - padding - visiblePagerHeight,
+		SiK.UI.Layout.apply(self.pager, { x = content.x, y = rowsBottom - visiblePagerHeight,
 			w = content.w, h = visiblePagerHeight })
 		self.pagerPrevX, self.pagerNextX = math.max(4, content.w / 2 - 40), math.min(content.w - 4, content.w / 2 + 40)
-		rowsBottom = self.root.h - padding - visiblePagerHeight
+		rowsBottom = rowsBottom - visiblePagerHeight
 	end
 	local rowsRect = { x = content.x, y = rowsY, w = content.w,
 		h = math.max(0, rowsBottom - rowsY) }
