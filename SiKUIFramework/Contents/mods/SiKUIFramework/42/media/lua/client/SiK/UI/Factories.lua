@@ -177,7 +177,12 @@ local function isInsideBlockContent(parent)
 	local current = parent
 	local depth = 0
 	while type(current) == "table" and depth < 64 do
-		if current._sikUiComponent == "blockContent"
+		-- Block used to expose a second physical `blockContent` panel.  The
+		-- canonical hierarchy now mounts children directly in the Block panel,
+		-- so that panel itself is the containing boundary.  Keep the legacy
+		-- markers only for consumers that have not remounted yet.
+		if current._sikUiComponent == "block"
+			or current._sikUiComponent == "blockContent"
 			or current._sikUiBlockContent == true then
 			return true
 		end

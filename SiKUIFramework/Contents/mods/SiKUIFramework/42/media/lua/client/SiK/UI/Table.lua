@@ -1219,6 +1219,12 @@ function Table.create(options)
 	local embedded = options.embedded == true
 	local paddingX = embedded and 0 or numberOr(options.paddingX, tokens.block.padding)
 	local paddingY = embedded and 0 or numberOr(options.paddingY, tokens.block.padding)
+	local blockBackground = options.background
+	local blockBorder = options.border
+	if embedded then
+		blockBackground = false
+		blockBorder = false
+	end
 	local blockHeaderSpec, blockHeaderHeight = resolveBlockHeader(options)
 	local blockHeaderGap = blockHeaderSpec and tokens.spacing.md or 0
 	local pagerHeight = options.pagination and math.max(1, numberOr(options.pagination.height, tokens.table.pagerHeight)) or 0
@@ -1231,8 +1237,8 @@ function Table.create(options)
 		contentHeight = 0, metrics = options.metrics,
 		variant = embedded and "transparent" or options.variant,
 		paddingX = paddingX, paddingY = paddingY,
-		background = embedded and false or options.background,
-		border = embedded and false or options.border,
+		background = blockBackground,
+		border = blockBorder,
 		fill = not embedded and options.fill == true, scrollable = true })
 	if not block then return nil, reason end
 	local header = createPanel(block.panel)

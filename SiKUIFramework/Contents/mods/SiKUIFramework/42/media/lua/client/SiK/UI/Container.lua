@@ -232,15 +232,19 @@ function Container.create(options)
 		w = options.w or options.width or 1, h = options.h or options.height or 1,
 		controlId = options.controlId or "container", playerNum = options.playerNum,
 	})
-        panel.drawBackground = options.background ~= nil
+	panel.drawBackground = options.background ~= nil and options.background ~= false
 	panel.clipChildren = options.overflow ~= "visible"
-	if options.background ~= nil then
+	if options.background ~= nil and options.background ~= false then
 		panel.backgroundColor = SiK.UI.Theme.normalizeColor(options.background,
 			{ r = 0, g = 0, b = 0, a = 0 })
+	elseif options.background == false then
+		panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	end
-	if options.border ~= nil then
+	if options.border ~= nil and options.border ~= false then
 		panel.borderColor = SiK.UI.Theme.normalizeColor(options.border,
 			{ r = 0, g = 0, b = 0, a = 0 })
+	elseif options.border == false then
+		panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	end
 	if options.accent ~= nil then
 		local previousPrerender = panel.prerender
