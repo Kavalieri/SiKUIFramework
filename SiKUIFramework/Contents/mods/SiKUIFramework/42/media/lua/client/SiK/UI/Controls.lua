@@ -57,6 +57,8 @@ local function decorate(widget, kind, options)
 		widget._sikTooltipHandle = SiK.UI.Tooltip.attach(widget, {
 			text = options.tooltip, playerNum = widget.playerNum,
 			placement = options.tooltipPlacement,
+			profile = options.tooltipProfile, maxWidth = options.tooltipMaxWidth,
+			channel = options.tooltipChannel,
 		})
 	end
 	function widget:setData(payload)
@@ -96,6 +98,9 @@ function Controls.setTooltip(control, value, options)
 		gap = options.gap,
 		placement = options.placement or options.tooltipPlacement,
 		environment = options.environment,
+		profile = options.profile or options.tooltipProfile,
+		maxWidth = options.maxWidth or options.tooltipMaxWidth,
+		channel = options.channel or options.tooltipChannel,
 	})
 	return control
 end
@@ -1366,6 +1371,11 @@ function Controls.sectionTitle(parent, options)
 			icon = info.icon or options.infoIcon or DEFAULT_INFO_ICON,
 			text = "", chrome = false, iconPadding = 0, iconSize = size,
 			tooltip = info.tooltip or options.tooltip, playerNum = options.playerNum,
+			tooltipProfile = info.profile or options.infoTooltipProfile or "informational",
+			tooltipMaxWidth = info.maxWidth or options.infoTooltipMaxWidth,
+			tooltipPlacement = info.placement or options.infoTooltipPlacement
+				or { anchor = "pointer", gap = 16 },
+			tooltipChannel = info.channel or "informational-help",
 			payload = info.payload, onClick = info.onClick,
 		})
 		cursorX = size + metrics.controlGap

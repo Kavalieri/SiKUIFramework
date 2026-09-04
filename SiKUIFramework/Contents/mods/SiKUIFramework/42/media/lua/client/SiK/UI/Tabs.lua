@@ -3,6 +3,7 @@ require "SiK/UI/Controls"
 require "SiK/UI/Layout"
 require "SiK/UI/Theme"
 require "SiK/UI/Icon"
+require "SiK/UI/Viewport"
 
 local Tabs = SiK.UI.Tabs or {}
 SiK.UI.Namespace.define("Tabs", Tabs)
@@ -221,7 +222,14 @@ function Tabs.create(options)
 					color.a, UIFont.Small)
 			end
 			if flyout.setMouseTransparent then flyout:setMouseTransparent(true) end
-			self.parent:addChild(flyout)
+			-- Rail help must live above every navigation destination. As a child of
+			-- the terminal surface it could be clipped or painted under the active
+			-- content host, leaving only a legacy/native tooltip visible.
+			if flyout.addToUIManager then
+				flyout:addToUIManager()
+				flyout._sikTransientAttached = true
+			end
+			flyout:setVisible(false)
 			self.flyout = flyout
 		end
 		self.flyout._sikText = text
@@ -235,14 +243,17 @@ function Tabs.create(options)
 		if text == nil or text == "" then self:_hideFlyout(); return end
 		local flyout = self:_ensureFlyout(text)
 		local gap = math.max(0, number(options.tooltipGap, 8))
-		local parentX = self.parent.getAbsoluteX and self.parent:getAbsoluteX() or self.parent.x or 0
-		local parentY = self.parent.getAbsoluteY and self.parent:getAbsoluteY() or self.parent.y or 0
-		local pointerX = (type(getMouseX) == "function" and getMouseX() or parentX) - parentX
-		local pointerY = (type(getMouseY) == "function" and getMouseY() or parentY) - parentY
+		local safe = SiK.UI.Viewport.safe(self.playerNum, options.environment, 0)
+		local pointerX = type(getMouseX) == "function" and getMouseX() or safe.x
+		local pointerY = type(getMouseY) == "function" and getMouseY() or safe.y
+		local side = options.tooltipSide or "after"
 		local x, y = pointerX + gap, pointerY + gap
-		if x + flyout.width > self.parent.width then x = pointerX - flyout.width - gap end
-		x = math.max(0, math.min(x, math.max(0, self.parent.width - flyout.width)))
-		y = math.max(0, math.min(y, math.max(0, self.parent.height - flyout.height)))
+		if side == "before" then x = pointerX - flyout.width - gap
+		elseif side == "above" then x, y = pointerX, pointerY - flyout.height - gap
+		elseif side == "below" then x, y = pointerX, pointerY + gap end
+		if x + flyout.width > safe.x + safe.w then x = pointerX - flyout.width - gap end
+		x = math.max(safe.x, math.min(x, safe.x + safe.w - flyout.width))
+		y = math.max(safe.y, math.min(y, safe.y + safe.h - flyout.height))
 		flyout:setX(x); flyout:setY(y); flyout:setVisible(true); flyout:bringToTop()
 		self.flyoutItem = item
 	end
@@ -454,7 +465,11 @@ function Tabs.create(options)
 		if self.disposed then return false end
 		self:_clearButtons()
 		if self.separator then removeChild(self.parent, self.separator); self.separator = nil end
-		if self.flyout then removeChild(self.parent, self.flyout); self.flyout = nil end
+		if self.flyout then
+			if self.flyout.removeFromUIManager then self.flyout:removeFromUIManager()
+			else removeChild(self.parent, self.flyout) end
+			self.flyout = nil
+		end
 		self.items = {}; self.parent = nil; self.disposed = true
 		return true
 	end

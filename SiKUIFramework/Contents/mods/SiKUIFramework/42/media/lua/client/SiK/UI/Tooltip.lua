@@ -353,9 +353,13 @@ end
 local function transientPanel(options)
 	local content = options.content or {}
 	if type(content) ~= "table" then content = { text = content } end
-	local maxWidth = math.max(120, tonumber(options.maxWidth) or 320)
 	local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
-        local width = math.max(1, math.min(maxWidth, safe.w))
+	local profile = options.profile or "compact"
+	local defaultWidth = profile == "informational" and 520 or 320
+	local viewportMargin = profile == "informational" and 32 or 0
+	local availableWidth = math.max(1, safe.w - viewportMargin)
+	local requestedWidth = math.max(120, tonumber(options.maxWidth) or defaultWidth)
+	local width = math.max(1, math.min(requestedWidth, availableWidth))
 	local document = Tooltip.createDocument({ sections = { {
 		title = content.title, text = content.text or options.text,
 		tone = content.tone or options.tone, framed = false,

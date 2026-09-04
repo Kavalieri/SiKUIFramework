@@ -173,11 +173,27 @@ local function tableModel(data)
         return { rows = type(data) == "table" and data or {} }
 end
 
+local function isInsideBlockContent(parent)
+	local current = parent
+	local depth = 0
+	while type(current) == "table" and depth < 64 do
+		if current._sikUiComponent == "blockContent"
+			or current._sikUiBlockContent == true then
+			return true
+		end
+		current = current.parent
+		depth = depth + 1
+	end
+	return false
+end
+
 local function tableFactory(parent, props, context)
 	local options = boundsOptions(parent, props, context)
 	-- A declarative Block is the table's sole visual container.  Keep Table's
 	-- header/rows/scroll lifecycle without painting another frame or padding.
-	options.embedded = parent._sikUiComponent == "blockContent"
+	-- Layout wrappers may sit between both, so resolve the established parent
+	-- chain instead of assuming that the immediate parent is the Block host.
+	options.embedded = isInsideBlockContent(parent)
 	-- Runtime adapters are product-owned behaviour injected into the neutral
 	-- Table widget. They may configure row rendering, exact identity,
 	-- expansion and selection, but never replace the declarative parent,
@@ -267,6 +283,13 @@ local function blockFactory(parent, props, context)
 		if not scroll then instance:dispose(); return nil, scrollErr end
 		instance:attachScroll(scroll, true)
 		instance.childParent = scroll.host
+	end
+	-- Builder may insert children through either the direct Block content host
+	-- or the host owned by its Scroll. Preserve the semantic parent in both
+	-- cases so nested Table/List controls do not create a second visual frame.
+	if instance.childParent then
+		instance.childParent._sikUiBlockContent = true
+		instance.childParent._sikUiBlock = instance
 	end
 	local disposeBlock = instance.dispose
 	function instance:dispose()
