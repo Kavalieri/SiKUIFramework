@@ -609,7 +609,12 @@ function TableInstance:_projectParent(parent, out)
 	state.disabledReason = type(externalState) == "table" and externalState.disabledReason or nil
 	self.childPages[parent.key] = state.page
 	self.childPageStates[parent.key] = state
-	if not self.activePageParentKey then self.activePageParentKey = parent.key end
+	-- The pager belongs to the expanded hierarchy currently being inspected.
+	-- A collapsed row must never become the active pageable parent merely
+	-- because it appears earlier in the table.
+	if self.expanded[parent.key] and not self.activePageParentKey then
+		self.activePageParentKey = parent.key
+	end
 	if not self.expanded[parent.key] or state.total == 0 then return end
 	local firstChild = self.pagination and self.pagination.external and 1 or state.first
 	local lastChild = self.pagination and self.pagination.external and #children or state.last
@@ -733,13 +738,20 @@ function TableInstance:_drawPager(panel)
 		state.hasNext and not state.disabled and a or a * 0.35, self.metrics.font) end
 end
 
+local function reservedPagerHeight(instance)
+	if not instance.pager or not instance.pageState
+			or instance.pageState.pageCount <= 1 then return 0 end
+	return instance.pagerHeight
+end
+
 function TableInstance:_syncGeometry()
 	if self.disposed then return end
+	local visiblePagerHeight = reservedPagerHeight(self)
 	local content = self.block:getContentRect()
 	local signature = table.concat({ tostring(content.x), tostring(content.y),
 		tostring(content.w), tostring(content.h), tostring(self.block.w),
 		tostring(self.block.h), tostring(self.blockHeaderHeight),
-		tostring(self.metrics.headerHeight), tostring(self.pagerHeight),
+		tostring(self.metrics.headerHeight), tostring(visiblePagerHeight),
 		tostring(#self.projectedRows) }, ":")
 	if self._geometrySignature == signature then return self end
 	self._geometrySignature = signature
@@ -753,11 +765,11 @@ function TableInstance:_syncGeometry()
 	SiK.UI.Layout.apply(self.header, { x = content.x, y = y, w = content.w, h = self.metrics.headerHeight })
 	local rowsY = y + self.metrics.headerHeight
 	local rowsBottom = self.block.h - padding
-	if self.pager then
-		SiK.UI.Layout.apply(self.pager, { x = content.x, y = self.block.h - padding - self.pagerHeight,
-			w = content.w, h = self.pagerHeight })
+	if visiblePagerHeight > 0 then
+		SiK.UI.Layout.apply(self.pager, { x = content.x, y = self.block.h - padding - visiblePagerHeight,
+			w = content.w, h = visiblePagerHeight })
 		self.pagerPrevX, self.pagerNextX = math.max(4, content.w / 2 - 40), math.min(content.w - 4, content.w / 2 + 40)
-		rowsBottom = self.block.h - padding - self.pagerHeight
+		rowsBottom = self.block.h - padding - visiblePagerHeight
 	end
 	local rowsRect = { x = content.x, y = rowsY, w = content.w,
 		h = math.max(0, rowsBottom - rowsY) }
@@ -783,7 +795,7 @@ function TableInstance:getRequiredHeight(rowCount)
 	count = math.max(self.minRows, count)
 	if self.maxRows then count = math.min(self.maxRows, count) end
 	local height = self.paddingY * 2 + self.blockHeaderHeight + self.blockHeaderGap + self.metrics.headerHeight
-		+ self.pagerHeight + count * self.metrics.rowHeight
+		+ reservedPagerHeight(self) + count * self.metrics.rowHeight
 	height = math.max(self.minHeight, height)
 	if self.maxHeight then height = math.min(self.maxHeight, height) end
 	return height
@@ -802,11 +814,11 @@ function TableInstance:_refreshRows(preserveOffset)
 	local previousOffset = preserveOffset == true and self.scroll:getScrollOffset() or 0
 	local projected = self:_projectRows()
 	self.projectedRows = projected
+	if self.pager then self.pager:setVisible(reservedPagerHeight(self) > 0) end
 	local chromeHeight = self.blockHeaderHeight + self.blockHeaderGap
-		+ self.metrics.headerHeight + self.pagerHeight
+		+ self.metrics.headerHeight + reservedPagerHeight(self)
 	self.block:setContentHeight(chromeHeight + #projected * self.metrics.rowHeight)
 	self:_applyAutoHeight()
-	if self.pager then self.pager:setVisible(self.pageState.pageCount > 1) end
 	if self.emptyPanel then self.emptyPanel:setVisible(#projected == 0) end
 	local result, reason = self.list:setData(projected, preserveOffset == true)
 	if result and preserveOffset == true then self.scroll:setScrollOffset(previousOffset) end
@@ -1048,8 +1060,13 @@ function TableInstance:toggleExpanded(key)
 	if not self.parentByKey[key] then return nil, "unknown_parent" end
 	-- Do not use `expanded[key] and nil or true`: Lua evaluates that form to
 	-- true in both branches.  Expansion must be a real two-state toggle.
-	if self.expanded[key] then self.expanded[key] = nil
-	else self.expanded[key] = true end
+	if self.expanded[key] then
+		self.expanded[key] = nil
+		if self.activePageParentKey == key then self.activePageParentKey = nil end
+	else
+		self.expanded[key] = true
+		self.activePageParentKey = key
+	end
 	local result, reason = self:_refreshRows(true)
 	if result and type(self.options.onExpansionChange) == "function" then
 		local parent = self.parentByKey[key]
@@ -1233,7 +1250,12 @@ function Table.create(options)
 		block.panel:removeChild(emptyPanel)
 		block.panel:addChild(emptyPanel)
 	end
-	block:attachScroll(scroll, false)
+	-- Table owns the viewport below its header and above its pager.  Attaching
+	-- this internal Scroll to Block makes Block:_sync() reset it to the whole
+	-- content rect whenever contentHeight changes; the first row then paints
+	-- over the header and short tables leave an apparent empty framed body.
+	-- Block still owns padding/overflow calculation, while _syncGeometry owns
+	-- the table-specific viewport and track rectangles.
 	local minimumRows = math.max(0, math.floor(numberOr(options.minRows, 1)))
 	local maximumRows = tonumber(options.maxRows)
 	if maximumRows then maximumRows = math.max(minimumRows, math.floor(maximumRows)) end

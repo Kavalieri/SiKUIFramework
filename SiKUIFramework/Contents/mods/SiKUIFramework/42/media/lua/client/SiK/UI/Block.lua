@@ -317,7 +317,7 @@ function Block.create(options)
 	local headerHeight = hasHeader and math.max(1,
 		tonumber(options.headerHeight) or controlMetrics.rowHeight) or 0
 	local headerGap = hasHeader and math.max(0,
-		tonumber(options.headerGap) or metricTokens.spacing.md) or 0
+		tonumber(options.headerGap) or metricTokens.spacing.sm) or 0
 	local extraReservedTop = math.max(0, tonumber(options.reservedTop) or 0)
 	local headerReservedTop = headerHeight + headerGap
 	local instance = setmetatable({

@@ -29,8 +29,12 @@ function Card.metrics(variant)
 			gap = 8, stateDotSize = 6, actionHeight = 32 }
 	end
 	if variant == "palette" then
-		return { minWidth = 160, minHeight = 92, iconSize = 32, padding = 8,
-			gap = 8, stateDotSize = 6, swatchHeight = 50 }
+		local padding, swatchHeight, titleGap = 8, 50, 5
+		return { minWidth = 160,
+			minHeight = math.max(92, padding * 2 + swatchHeight + titleGap
+				+ fontHeight(UIFont.Small)),
+			iconSize = 32, padding = padding, gap = 8, stateDotSize = 6,
+			swatchHeight = swatchHeight, titleGap = titleGap }
 	end
 	return { minWidth = 160, minHeight = 64, iconSize = 32, padding = 8,
 		gap = 8, stateDotSize = 6 }
@@ -126,7 +130,7 @@ function Card.create(options)
 					self.width - metrics.padding - 18, metrics.padding,
 					18, 18)
 			end
-			local titleY = metrics.padding + previewH + 5
+			local titleY = metrics.padding + previewH + (metrics.titleGap or 5)
 			self:drawText(clipped(data.title, previewW, UIFont.Small), x, titleY,
 				theme.text.r, theme.text.g, theme.text.b, alpha, UIFont.Small)
 			return

@@ -143,7 +143,12 @@ local function decorateTabButton(button, item, placement, options)
 		if selected then
 			local color = resolvedColor(options.selectedBorderColor, "accent", options.theme)
 			if options.selectionStyle == "border" then
-				self:drawRectBorder(0, 0, self.width, self.height, color.a,
+				-- PZ rasteriza drawRectBorder sobre el limite recibido. En un rail
+				-- pegado al borde del viewport, x=0 deja medio trazo fuera del clip
+				-- del padre y la iluminacion izquierda desaparece. Mantener el trazo
+				-- completo dentro del slot sin alterar su geometria ni la del icono.
+				self:drawRectBorder(1, 1, math.max(0, self.width - 2),
+					math.max(0, self.height - 2), color.a,
 					color.r, color.g, color.b)
 			else
 				local thickness = math.max(1, number(options.accentSize, 3))
