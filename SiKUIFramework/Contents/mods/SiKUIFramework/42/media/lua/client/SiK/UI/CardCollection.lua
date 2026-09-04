@@ -60,7 +60,8 @@ function CardCollection.create(options)
 			statusTone = item.statusTone or item.tone,
 			swatches = item.swatches, selected = item.selected == true,
 			actions = item.actions, locked = item.locked,
-			tooltip = item.tooltip, payload = item.payload,
+			tooltip = item.tooltip, tooltipPlacement = item.tooltipPlacement,
+			payload = item.payload,
 			onActivate = item.action or item.onActivate or options.onActivate,
 			playerNum = options.playerNum, theme = options.theme,
 		})

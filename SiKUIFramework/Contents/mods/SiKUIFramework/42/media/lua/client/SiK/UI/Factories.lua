@@ -174,7 +174,10 @@ local function tableModel(data)
 end
 
 local function tableFactory(parent, props, context)
-        local options = boundsOptions(parent, props, context)
+	local options = boundsOptions(parent, props, context)
+	-- A declarative Block is the table's sole visual container.  Keep Table's
+	-- header/rows/scroll lifecycle without painting another frame or padding.
+	options.embedded = parent._sikUiComponent == "blockContent"
 	-- Runtime adapters are product-owned behaviour injected into the neutral
 	-- Table widget. They may configure row rendering, exact identity,
 	-- expansion and selection, but never replace the declarative parent,
@@ -280,6 +283,7 @@ end
 
 local function formFactory(parent, props, context)
 	local options = boundsOptions(parent, props, context)
+	options.variant = props.variant
 	local fields = props.capabilities["form.fields"]
 	options.fields = fields and fields.fields or props.fields or {}
 	local actions = fields and fields.actions or props.actions

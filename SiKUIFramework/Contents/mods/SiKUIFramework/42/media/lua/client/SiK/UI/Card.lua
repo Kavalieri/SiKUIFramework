@@ -53,8 +53,8 @@ function Card.create(options)
 		x = options.x or 0, y = options.y or 0,
                 w = options.w or options.width or metrics.minWidth,
                 h = options.h or options.height or metrics.minHeight,
-                controlId = "card", playerNum = options.playerNum,
-		tooltip = options.tooltip,
+		controlId = "card", playerNum = options.playerNum,
+		tooltip = options.tooltip, tooltipPlacement = options.tooltipPlacement,
 	})
 	local instance = { panel = panel, options = options, variant = variant,
 		payload = options.payload, data = {}, actions = options.actions or {} }

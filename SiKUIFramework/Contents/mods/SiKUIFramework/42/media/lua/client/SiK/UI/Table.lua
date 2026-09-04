@@ -129,9 +129,11 @@ function Table.metrics(options)
 	options = options or {}
 	local tokens = SiK.UI.Metrics.tokens(options.metrics)
 	local font = options.font or (UIFont and UIFont.Small) or nil
-	return { font = font, fontHeight = fontHeight(font),
+	local resolvedFontHeight = fontHeight(font)
+	return { font = font, fontHeight = resolvedFontHeight,
 		rowHeight = math.max(1, numberOr(options.rowHeight, tokens.table.rowHeight)),
-		headerHeight = math.max(1, numberOr(options.headerHeight, tokens.table.headerHeight)),
+		headerHeight = math.max(resolvedFontHeight + tokens.table.headerVerticalPadding * 2,
+			numberOr(options.headerHeight, tokens.table.headerHeight)),
 		gap = math.max(0, numberOr(options.columnGap or options.gap, tokens.table.columnGap)),
 		left = math.max(0, numberOr(options.left, 0)), right = math.max(0, numberOr(options.right, 0)),
 		cellPadding = math.max(0, numberOr(options.cellPadding, tokens.table.cellPadding)) }
@@ -140,7 +142,7 @@ end
 local function measuredWidth(spec, font)
 	local title = spec.title or SiK.UI.resolveText(spec.titleKey, spec.key) or ""
 	local widest = measure(spec.font or font, title)
-	if spec.sortable == true then widest = widest + 18 end
+	if spec.sortable ~= false then widest = widest + 18 end
 	for index = 1, #(spec.measureValues or {}) do
 		widest = math.max(widest, measure(spec.font or font, spec.measureValues[index]))
 	end
@@ -741,8 +743,7 @@ function TableInstance:_syncGeometry()
 		tostring(#self.projectedRows) }, ":")
 	if self._geometrySignature == signature then return self end
 	self._geometrySignature = signature
-	local padding, y = SiK.UI.Metrics.tokens(self.options.metrics).block.padding,
-		SiK.UI.Metrics.tokens(self.options.metrics).block.padding
+	local padding, y = self.paddingY, self.paddingY
 	if self.blockHeader then
 		SiK.UI.Layout.apply(self.blockHeader, { x = content.x, y = y,
 			w = content.w, h = self.blockHeaderHeight })
@@ -781,8 +782,7 @@ function TableInstance:getRequiredHeight(rowCount)
 	local count = math.max(0, math.floor(numberOr(rowCount, #self.projectedRows)))
 	count = math.max(self.minRows, count)
 	if self.maxRows then count = math.min(self.maxRows, count) end
-	local padding = SiK.UI.Metrics.tokens(self.options.metrics).block.padding
-	local height = padding * 2 + self.blockHeaderHeight + self.blockHeaderGap + self.metrics.headerHeight
+	local height = self.paddingY * 2 + self.blockHeaderHeight + self.blockHeaderGap + self.metrics.headerHeight
 		+ self.pagerHeight + count * self.metrics.rowHeight
 	height = math.max(self.minHeight, height)
 	if self.maxHeight then height = math.min(self.maxHeight, height) end
@@ -1016,6 +1016,30 @@ function TableInstance:setSort(key, ascending)
 	return self
 end
 
+local function sortableValue(column, item, index)
+	local value = projection(column, item, index)
+	value = type(value) == "table" and (value.sortValue ~= nil and value.sortValue or value.text) or value
+	if type(value) == "number" then return 0, value end
+	if type(value) == "boolean" then return 1, value and 1 or 0 end
+	return 2, string.lower(tostring(value or ""))
+end
+
+function TableInstance:_applyLocalSort(column)
+	local decorated = {}
+	for index = 1, #self.rows do decorated[index] = { item = self.rows[index], index = index } end
+	table.sort(decorated, function(left, right)
+		local leftType, leftValue = sortableValue(column, left.item, left.index)
+		local rightType, rightValue = sortableValue(column, right.item, right.index)
+		local before = leftType < rightType or (leftType == rightType and leftValue < rightValue)
+		local equal = leftType == rightType and leftValue == rightValue
+		if equal then return left.index < right.index end
+		return self.sortAsc and before or not before
+	end)
+	for index = 1, #decorated do self.rows[index] = decorated[index].item end
+	self:_rebuildSemanticIndex()
+	return self:_refreshRows(true)
+end
+
 function TableInstance:previousPage() return self:setPage(self.page - 1) end
 function TableInstance:nextPage() return self:setPage(self.page + 1) end
 
@@ -1124,11 +1148,14 @@ local function attachHeaderInteraction(instance)
 			return true
 		end
 		local column = Table.columnAtX(instance.columnLayout, numberOr(x, -1))
-		if column and column.spec.sortable == true and instance.onSort then
-			local ascending = column.key == instance.sortKey and not instance.sortAsc or true
+		if column and column.spec.sortable ~= false then
+			local ascending = true
+			if column.key == instance.sortKey then ascending = not instance.sortAsc end
 			instance:setSort(column.key, ascending)
-			instance.onSort({ playerNum = instance.playerNum, component = instance,
-				key = column.key, ascending = ascending })
+			if instance.onSort then
+				instance.onSort({ playerNum = instance.playerNum, component = instance,
+					key = column.key, ascending = ascending })
+			else instance:_applyLocalSort(column.spec) end
 			return true
 		end
 		return false
@@ -1153,14 +1180,21 @@ function Table.create(options)
 		return nil, "invalid_external_pagination"
 	end
 	local metrics, tokens = Table.metrics(options), SiK.UI.Metrics.tokens(options.metrics)
+	local embedded = options.embedded == true
+	local paddingX = embedded and 0 or numberOr(options.paddingX, tokens.block.padding)
+	local paddingY = embedded and 0 or numberOr(options.paddingY, tokens.block.padding)
 	local blockHeaderSpec, blockHeaderHeight = resolveBlockHeader(options)
 	local blockHeaderGap = blockHeaderSpec and tokens.spacing.md or 0
 	local pagerHeight = options.pagination and math.max(1, numberOr(options.pagination.height, tokens.table.pagerHeight)) or 0
 	local block, reason = SiK.UI.Block.create({ parent = options.parent, x = options.x, y = options.y,
 		w = options.w or options.width, h = options.h or options.height,
 		reservedTop = blockHeaderHeight + blockHeaderGap + metrics.headerHeight, reservedBottom = pagerHeight,
-		contentHeight = 0, metrics = options.metrics, background = options.background,
-		border = options.border, fill = options.fill == true, scrollable = true })
+		contentHeight = 0, metrics = options.metrics,
+		variant = embedded and "transparent" or options.variant,
+		paddingX = paddingX, paddingY = paddingY,
+		background = embedded and false or options.background,
+		border = embedded and false or options.border,
+		fill = not embedded and options.fill == true, scrollable = true })
 	if not block then return nil, reason end
 	local header = createPanel(block.panel)
 	local blockHeader = blockHeaderSpec and SiK.UI.Controls.blockHeader(block.panel, blockHeaderSpec) or nil
@@ -1211,6 +1245,7 @@ function Table.create(options)
 			onPageChange = options.pagination.onPageChange,
 		} or nil,
 		page = 1, pageState = nil, options = options, colors = SiK.UI.Theme.tokens(options.theme),
+		paddingX = paddingX, paddingY = paddingY,
 		sortKey = options.sortKey, sortAsc = options.sortAsc ~= false,
 		onColumnResize = options.onColumnResize, onSort = type(options.onSort) == "function" and options.onSort or nil,
 		playerNum = math.max(0, math.floor(numberOr(options.playerNum, 0))),

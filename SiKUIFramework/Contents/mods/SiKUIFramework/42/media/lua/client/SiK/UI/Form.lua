@@ -2,6 +2,7 @@ require "SiK/UI/Namespace"
 require "SiK/UI/Controls"
 require "SiK/UI/Metrics"
 require "SiK/UI/Layout"
+require "SiK/UI/Theme"
 require "ISUI/ISPanel"
 
 local Form = SiK.UI.Form or {}
@@ -37,7 +38,13 @@ function Form.create(options)
 	if type(options.parent) ~= "table" then return nil, "invalid_parent" end
 	local panel = ISPanel:new(options.x or 0, options.y or 0,
 		options.w or options.width or 1, options.h or options.height or 1)
-	panel:initialise(); panel.drawBackground = false; options.parent:addChild(panel)
+	panel:initialise()
+	panel.drawBackground = options.variant == "inline"
+	panel.backgroundColor = panel.drawBackground
+		and SiK.UI.Theme.color("surface", options.theme)
+		or { r = 0, g = 0, b = 0, a = 0 }
+	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	options.parent:addChild(panel)
 	local instance = { panel = panel, parent = options.parent, options = options,
 		entries = {}, byKey = {}, errors = {},
 		playerNum = math.max(0, math.floor(tonumber(options.playerNum) or 0)) }

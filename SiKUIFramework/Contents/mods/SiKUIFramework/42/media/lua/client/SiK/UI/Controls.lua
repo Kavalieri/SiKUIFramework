@@ -56,6 +56,7 @@ local function decorate(widget, kind, options)
 	if options.tooltip ~= nil then
 		widget._sikTooltipHandle = SiK.UI.Tooltip.attach(widget, {
 			text = options.tooltip, playerNum = widget.playerNum,
+			placement = options.tooltipPlacement,
 		})
 	end
 	function widget:setData(payload)
@@ -93,6 +94,7 @@ function Controls.setTooltip(control, value, options)
 		playerNum = options.playerNum or control.playerNum or 0,
 		factory = options.factory,
 		gap = options.gap,
+		placement = options.placement or options.tooltipPlacement,
 		environment = options.environment,
 	})
 	return control

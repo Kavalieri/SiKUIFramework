@@ -43,10 +43,10 @@ Metrics.profiles = Metrics.profiles or {
 		window = {
 			preferredWidth = 1600, preferredHeight = 900,
 			minWidth = 720, minHeight = 480,
-			-- Runtime PZ: rail amplio y asset productivo nativo de 72 px, sin
-			-- reescalado correctivo. Las celdas conservan 4 px de separación.
-			railWidth = 104, railItemHeight = 76, railIconSize = 72,
-			railPadding = 4, railGap = 4, railSlotInset = 0,
+                        -- Rail, celda y asset comparten el cuadrado nominal. No se
+                        -- reserva una segunda franja horizontal alrededor del icono.
+                        railWidth = 76, railItemHeight = 76, railIconSize = 76,
+                        railPadding = 0, railGap = 4, railSlotInset = 0,
 			headerHeight = 52, footerMinimumHeight = 0,
 			footerLines = 1, footerPaddingY = 12, footerLineGap = 0,
 		},
@@ -55,7 +55,7 @@ Metrics.profiles = Metrics.profiles or {
 	editor = {
 		minWidth = 760, minHeight = 620, contentGap = 6, rowHeight = 30,
 		window = { preferredWidth = 1180, preferredHeight = 1048,
-			minWidth = 760, minHeight = 620, maxWidth = 1180, maxHeight = 1600,
+			minWidth = 760, minHeight = 620, maxWidth = 8192, maxHeight = 8192,
 			railWidth = 0, headerHeight = 52, footerHeight = 24 },
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
 	},

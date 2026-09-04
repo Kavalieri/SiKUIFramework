@@ -45,8 +45,8 @@ Window.profiles = Window.profiles or {
 		maxWidth = 1000, maxHeight = 800, capWidth = 0.86, capHeight = 0.86 },
 	wide = { width = 1000, height = 720, minWidth = 720, minHeight = 520,
 		maxWidth = 1200, maxHeight = 860, capWidth = 0.92, capHeight = 0.90 },
-	editor = { width = 860, height = 640, minWidth = 600, minHeight = 460,
-		maxWidth = 1000, maxHeight = 800, capWidth = 0.86, capHeight = 0.86 },
+	editor = { width = 1180, height = 1048, minWidth = 760, minHeight = 620,
+		maxWidth = 8192, maxHeight = 8192, capWidth = 1, capHeight = 1 },
 	task = { width = 640, height = 520, minWidth = 420, minHeight = 260,
 		maxWidth = 760, maxHeight = 760, capWidth = 0.80, capHeight = 0.80 },
 }
