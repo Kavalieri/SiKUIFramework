@@ -45,6 +45,11 @@ local function tooltipText(item)
 	return nil
 end
 
+local function optionTooltipText(item)
+	if not item or item.tooltip == nil then return nil end
+	return tostring(item.tooltip)
+end
+
 local function resolvedColor(value, fallback, theme)
 	if type(value) == "table" then
 		return { r = number(value.r or value[1], 1),
@@ -193,95 +198,10 @@ function Tabs.create(options)
 		orientation = (placement == "left" or placement == "right") and "side" or "top",
 		placement = placement,
 		items = {}, buttons = {}, byKey = {}, activeKey = options.activeKey,
-		options = options, separator = nil, flyout = nil,
+		options = options, separator = nil,
 	}
 
-	function instance:_hideFlyout()
-		if self.flyout then self.flyout:setVisible(false) end
-		self.flyoutItem = nil
-	end
-
-	function instance:_ensureFlyout(text)
-		local manager = type(getTextManager) == "function" and getTextManager() or nil
-		local fontHeight = manager and manager:getFontHeight(UIFont.Small) or 18
-		local textWidth = manager and manager:MeasureStringX(UIFont.Small, text) or (#text * 8)
-		local width = textWidth + math.max(0, number(options.tooltipPaddingX, 8)) * 2
-		local height = fontHeight + math.max(0, number(options.tooltipPaddingY, 5)) * 2
-		if not self.flyout then
-			local flyout = ISPanel:new(0, 0, width, height)
-			flyout:initialise()
-			flyout.drawBackground = false
-			flyout.prerender = function(panel)
-				local background = resolvedColor(options.tooltipBackgroundColor,
-					"surfaceAlt", options.theme)
-				local border = resolvedColor(options.tooltipBorderColor, "border", options.theme)
-				panel:drawRect(0, 0, panel.width, panel.height, background.a,
-					background.r, background.g, background.b)
-				panel:drawRectBorder(0, 0, panel.width, panel.height, border.a,
-					border.r, border.g, border.b)
-			end
-			flyout.render = function(panel)
-				local color = resolvedColor(options.tooltipTextColor, "text", options.theme)
-				panel:drawText(panel._sikText or "", number(options.tooltipPaddingX, 8),
-					number(options.tooltipPaddingY, 5), color.r, color.g, color.b,
-					color.a, UIFont.Small)
-			end
-			if flyout.setMouseTransparent then flyout:setMouseTransparent(true) end
-			-- Rail help must live above every navigation destination. As a child of
-			-- the terminal surface it could be clipped or painted under the active
-			-- content host, leaving only a legacy/native tooltip visible.
-			if flyout.addToUIManager then
-				flyout:addToUIManager()
-				flyout._sikTransientAttached = true
-			end
-			flyout:setVisible(false)
-			self.flyout = flyout
-		end
-		self.flyout._sikText = text
-		self.flyout:setWidth(width)
-		self.flyout:setHeight(height)
-		return self.flyout
-	end
-
-	function instance:_showFlyout(button, item)
-		local text = tooltipText(item)
-		if text == nil or text == "" then self:_hideFlyout(); return end
-		local flyout = self:_ensureFlyout(text)
-		local gap = math.max(0, number(options.tooltipGap, 8))
-		local safe = SiK.UI.Viewport.safe(self.playerNum, options.environment, 0)
-		local pointerX = type(getMouseX) == "function" and getMouseX() or safe.x
-		local pointerY = type(getMouseY) == "function" and getMouseY() or safe.y
-		local side = options.tooltipSide or "after"
-		local x, y = pointerX + gap, pointerY + gap
-		if side == "before" then x = pointerX - flyout.width - gap
-		elseif side == "above" then x, y = pointerX, pointerY - flyout.height - gap
-		elseif side == "below" then x, y = pointerX, pointerY + gap end
-		if x + flyout.width > safe.x + safe.w then x = pointerX - flyout.width - gap end
-		x = math.max(safe.x, math.min(x, safe.x + safe.w - flyout.width))
-		y = math.max(safe.y, math.min(y, safe.y + safe.h - flyout.height))
-		flyout:setX(x); flyout:setY(y); flyout:setVisible(true); flyout:bringToTop()
-		self.flyoutItem = item
-	end
-
-	function instance:_bindFlyout(button, item)
-		local previousMove = button.onMouseMove
-		local previousOutside = button.onMouseMoveOutside
-		button.onMouseMove = function(control, ...)
-			local result
-			if type(previousMove) == "function" then result = previousMove(control, ...) end
-			self:_showFlyout(control, control._sikTabItem or item)
-			return result == nil and true or result
-		end
-		button.onMouseMoveOutside = function(control, ...)
-			local result
-			if type(previousOutside) == "function" then result = previousOutside(control, ...) end
-			self:_hideFlyout()
-			return result
-		end
-	end
-
 	function instance:_clearButtons()
-		self:_hideFlyout()
 		for index = 1, #self.buttons do self.buttons[index]:dispose() end
 		self.buttons, self.byKey = {}, {}
 	end
@@ -308,11 +228,23 @@ function Tabs.create(options)
 			local item = self.items[index]
 			local key = item.key or tostring(index)
 			local button
+			local tabTooltip = options.tooltipMode == "flyout"
+				and optionTooltipText(item) or tooltipText(item)
 			button = SiK.UI.Controls.toggle({ parent = self.parent,
 				text = (item.iconOnly == true or options.iconOnly == true) and ""
 					or (item.text or ""),
 				selected = key == self.activeKey,
-				tooltip = options.tooltipMode == "flyout" and nil or tooltipText(item),
+				tooltip = tabTooltip,
+				tooltipProfile = options.tooltipMode == "flyout"
+					and (options.tooltipProfile or "option") or options.tooltipProfile,
+				tooltipMaxWidth = options.tooltipMode == "flyout"
+					and (options.tooltipMaxWidth or 220) or options.tooltipMaxWidth,
+				tooltipPlacement = options.tooltipMode == "flyout" and {
+					anchor = "control", side = options.tooltipSide or "before",
+					gap = options.tooltipGap or 4,
+				} or options.tooltipPlacement,
+				tooltipChannel = options.tooltipMode == "flyout"
+					and (options.tooltipChannel or "option") or options.tooltipChannel,
 				enabled = item.enabled ~= false,
 				playerNum = self.playerNum, payload = item.payload,
 				onChange = function(context)
@@ -322,17 +254,8 @@ function Tabs.create(options)
 					end
 				end,
 			})
-			-- Flyout mode is the sole tooltip owner. Clear any native tooltip state
-			-- retained by a recycled/custom control to prevent duplicate labels.
-			if options.tooltipMode == "flyout" then
-				if button._sikTooltipHandle and button._sikTooltipHandle.dispose then
-					button._sikTooltipHandle:dispose()
-				end
-				button._sikTooltipHandle, button.tooltip = nil, nil
-			end
 			decorateTabButton(button, item, self.placement, options)
 			button._sikTabKey = key
-			if options.tooltipMode == "flyout" then self:_bindFlyout(button, item) end
 			self.buttons[#self.buttons + 1] = button
 			self.byKey[key] = { item = item, button = button }
 		end
@@ -368,14 +291,14 @@ function Tabs.create(options)
 		for name, value in pairs(patch) do entry.item[name] = value end
 		entry.button:setTabItem(entry.item)
 		if entry.button.setEnabled then entry.button:setEnabled(entry.item.enabled ~= false) end
-		local text = tooltipText(entry.item)
-		if options.tooltipMode ~= "flyout" and entry.button._sikTooltipHandle then
+		local text = options.tooltipMode == "flyout"
+			and optionTooltipText(entry.item) or tooltipText(entry.item)
+		if entry.button._sikTooltipHandle then
 			entry.button._sikTooltipHandle:setText(text)
-		elseif options.tooltipMode ~= "flyout" then
+		else
 			if entry.button.setTooltip then entry.button:setTooltip(text)
 			else entry.button.tooltip = text end
 		end
-		if self.flyoutItem == entry.item then self:_showFlyout(entry.button, entry.item) end
 		return entry.item
 	end
 
@@ -384,7 +307,13 @@ function Tabs.create(options)
 	function instance:getButton(key)
 		return self.byKey[key] and self.byKey[key].button or nil
 	end
-	function instance:hideTooltip() self:_hideFlyout(); return self end
+	function instance:hideTooltip()
+		for index = 1, #self.buttons do
+			local handle = self.buttons[index]._sikTooltipHandle
+			if handle and handle.hide then handle:hide() end
+		end
+		return self
+	end
 
 	function instance:setLayoutOptions(nextOptions)
 		if self.disposed then return nil, "disposed" end
@@ -470,11 +399,6 @@ function Tabs.create(options)
 		if self.disposed then return false end
 		self:_clearButtons()
 		if self.separator then removeChild(self.parent, self.separator); self.separator = nil end
-		if self.flyout then
-			if self.flyout.removeFromUIManager then self.flyout:removeFromUIManager()
-			else removeChild(self.parent, self.flyout) end
-			self.flyout = nil
-		end
 		self.items = {}; self.parent = nil; self.disposed = true
 		return true
 	end

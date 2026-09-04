@@ -637,8 +637,10 @@ function TableInstance:_projectRows()
 			local key = self.keyOf(self.rows[index], index)
 			self:_projectParent(self.parentByKey[key], visible)
 		end
-		local active = self.activePageParentKey or self.firstPageParentKey
-		self.activePageParentKey = active
+		-- Pagination belongs exclusively to the hierarchy the player opened.
+		-- Falling back to the first expandable root paints a misleading global
+		-- pager at the bottom of an otherwise virtualized/scrollable table.
+		local active = self.activePageParentKey
 		self.pageState = active and self.childPageStates[active]
 			or pageState(0, 1, self.pagination and self.pagination.pageSize or 15)
 		self.page = self.pageState.page
@@ -987,7 +989,7 @@ end
 function TableInstance:setPage(page)
 	if not self.pagination then return nil, "pagination_disabled" end
 	if self.expansion then
-		local parentKey = self.activePageParentKey or self.firstPageParentKey
+		local parentKey = self.activePageParentKey
 		if parentKey == nil then return nil, "no_pageable_parent" end
 		return self:setChildPage(parentKey, page)
 	end
