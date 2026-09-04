@@ -1350,20 +1350,35 @@ function Controls.sectionTitle(parent, options)
 	parent, options = controlArgs(parent, options)
 	local metrics = Controls.metrics(options.profile)
 	local font = options.font or UIFont.Small
+	local labelHeight = fontHeight(font)
+	local hasInfo = options.tooltip ~= nil or options.info ~= nil
+	local requestedHeight = n(options.h or options.height, metrics.rowHeight)
+	local infoSpec = type(options.info) == "table" and options.info or {}
+	local infoHeight = hasInfo and math.max(24, n(infoSpec.size, 24)) or 0
 	local panel = ISPanel:new(n(options.x, 0), n(options.y, 0),
 		math.max(1, n(options.w or options.width, 200)),
-		math.max(1, n(options.h or options.height, metrics.rowHeight)))
+		math.max(1, requestedHeight, labelHeight, infoHeight))
 	panel:initialise(); panel.drawBackground = false
 	-- A section title is geometry, not a nested card. ISPanel keeps a visible
 	-- vanilla border unless both colours are cleared, which used to draw boxes
 	-- around window titles and BlockHeader labels.
 	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	decorate(panel, "sectionTitle", options)
+	-- The title itself is geometry. Help belongs exclusively to the leading info
+	-- control; attaching the same tooltip to this full-width parent created a
+	-- second compact tooltip which raced the informational one on hover.
+	local titleOptions = {}
+	for key, value in pairs(options) do
+		if key ~= "tooltip" and key ~= "tooltipProfile" and key ~= "tooltipMaxWidth"
+			and key ~= "tooltipPlacement" and key ~= "tooltipChannel" then
+			titleOptions[key] = value
+		end
+	end
+	decorate(panel, "sectionTitle", titleOptions)
 	local color = SiK.UI.Theme.color("text", options.theme)
 	local cursorX = 0
-	if options.tooltip or options.info then
-		local info = type(options.info) == "table" and options.info or {}
+	if hasInfo then
+		local info = infoSpec
 		-- Framework symbols are pre-sized; preserve the exact 24 px source.
 		local size = math.min(panel.height, math.max(24, n(info.size, 24)))
 		panel.info = Controls.iconButton(panel, {
@@ -1383,7 +1398,6 @@ function Controls.sectionTitle(parent, options)
 	panel._sikFullText = tostring(options.text or "")
 	panel.align = options.align or "left"
 	panel.verticalAlign = options.verticalAlign or "middle"
-	local labelHeight = fontHeight(font)
 	panel.label = ISLabel:new(cursorX, math.floor((panel.height - labelHeight) / 2),
 		labelHeight, panel._sikFullText,
 		color.r, color.g, color.b, color.a, font, true)

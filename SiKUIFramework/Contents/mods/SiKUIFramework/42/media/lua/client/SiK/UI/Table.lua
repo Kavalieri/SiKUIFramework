@@ -1115,7 +1115,10 @@ end
 
 local function attachHeaderInteraction(instance)
 	local panel = instance.header
-	panel.onMouseDown = function(self, x)
+	panel.onMouseDown = function(self, x, y)
+		self._sikHeaderPress = nil
+		if numberOr(x, -1) < 0 or numberOr(x, -1) >= self.width
+			or numberOr(y, -1) < 0 or numberOr(y, -1) >= self.height then return false end
 		for index = 1, #instance.columnLayout - 1 do
 			local left = instance.columnLayout[index]
 			if left.spec.resizable ~= false and math.abs(numberOr(x, 0) - left.finish) <= 6 then
@@ -1125,6 +1128,10 @@ local function attachHeaderInteraction(instance)
 				return true
 			end
 		end
+		self._sikHeaderPress = Table.columnAtX(instance.columnLayout, numberOr(x, -1))
+		-- Arm an ordinary header click without claiming it as a resize gesture.
+		-- Vanilla still delivers onMouseUp to the header, where the matching
+		-- visible header cell is verified before sorting.
 		return false
 	end
 	panel.onMouseMove = function(self, dx)
@@ -1140,15 +1147,19 @@ local function attachHeaderInteraction(instance)
 		instance.list:refresh()
 		return true
 	end
-	local function release(self, x)
+	local function release(self, x, y)
 		if self._sikResize then
 			self._sikResize = nil
 			if self.setCapture then self:setCapture(false) end
 			if instance.onColumnResize then instance.onColumnResize(instance.columnOptions.columnWidths, instance) end
 			return true
 		end
+		local pressed = self._sikHeaderPress
+		self._sikHeaderPress = nil
+		if not pressed or numberOr(x, -1) < 0 or numberOr(x, -1) >= self.width
+			or numberOr(y, -1) < 0 or numberOr(y, -1) >= self.height then return false end
 		local column = Table.columnAtX(instance.columnLayout, numberOr(x, -1))
-		if column and column.spec.sortable ~= false then
+		if column and column.key == pressed.key and column.spec.sortable ~= false then
 			local ascending = true
 			if column.key == instance.sortKey then ascending = not instance.sortAsc end
 			instance:setSort(column.key, ascending)
@@ -1160,7 +1171,13 @@ local function attachHeaderInteraction(instance)
 		end
 		return false
 	end
-	panel.onMouseUp, panel.onMouseUpOutside = release, release
+	panel.onMouseUp = release
+	panel.onMouseUpOutside = function(self)
+		local resized = self._sikResize ~= nil
+		self._sikResize, self._sikHeaderPress = nil, nil
+		if self.setCapture then self:setCapture(false) end
+		return resized
+	end
 end
 
 --- Canonical professional table composition: one Block owns padding and
@@ -1188,7 +1205,10 @@ function Table.create(options)
 	local pagerHeight = options.pagination and math.max(1, numberOr(options.pagination.height, tokens.table.pagerHeight)) or 0
 	local block, reason = SiK.UI.Block.create({ parent = options.parent, x = options.x, y = options.y,
 		w = options.w or options.width, h = options.h or options.height,
-		reservedTop = blockHeaderHeight + blockHeaderGap + metrics.headerHeight, reservedBottom = pagerHeight,
+		-- Header, rows and pager are positioned by TableInstance itself. Reserving
+		-- them again in Block shortens the same viewport a second time and leaves
+		-- an apparent empty framed block under short embedded tables.
+		reservedTop = 0, reservedBottom = 0,
 		contentHeight = 0, metrics = options.metrics,
 		variant = embedded and "transparent" or options.variant,
 		paddingX = paddingX, paddingY = paddingY,

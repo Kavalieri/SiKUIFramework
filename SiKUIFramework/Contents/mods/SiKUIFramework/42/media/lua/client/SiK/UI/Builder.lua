@@ -344,6 +344,28 @@ intrinsicHeight = function(node, layout, context, parentMode, measuring)
 	end
 	if node.type == "table" or node.type == "virtual-list" then
 		local tableMetrics = SiK.UI.Metrics.tokens().table
+		local runtime = context.tableOptions and context.tableOptions[node.id] or nil
+		if node.type == "table" and type(runtime) == "table" and runtime.autoHeight == true then
+			local model = nodeProperty(node, "data", context)
+			local rows = type(model) == "table" and (model.rows or model) or {}
+			local rowCount = type(rows) == "table" and #rows or 0
+			local minimumRows = math.max(0, math.floor(n(runtime.minRows, 1)))
+			local maximumRows = tonumber(runtime.maxRows)
+			if maximumRows then rowCount = math.min(rowCount, math.max(minimumRows,
+				math.floor(maximumRows))) end
+			rowCount = math.max(rowCount, minimumRows)
+			local headerHeight = math.max(1, n(runtime.headerHeight, tableMetrics.headerHeight))
+			local rowHeight = math.max(1, n(runtime.rowHeight, tableMetrics.rowHeight))
+			local measured = headerHeight + rowCount * rowHeight
+			if runtime.pagination then
+				measured = measured + math.max(1, n(runtime.pagination.height,
+					tableMetrics.pagerHeight))
+			end
+			measured = math.max(n(runtime.minHeight, 0), measured)
+			if runtime.maxHeight ~= nil then measured = math.min(measured,
+				math.max(1, n(runtime.maxHeight, measured))) end
+			return math.max(1, measured)
+		end
 		return math.max(120, tableMetrics.headerHeight + tableMetrics.rowHeight * 2)
 	end
 	if node.type == "card" then

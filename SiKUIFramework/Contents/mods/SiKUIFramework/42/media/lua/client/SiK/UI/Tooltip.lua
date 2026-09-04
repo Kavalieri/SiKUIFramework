@@ -355,7 +355,10 @@ local function transientPanel(options)
 	if type(content) ~= "table" then content = { text = content } end
 	local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
 	local profile = options.profile or "compact"
-	local defaultWidth = profile == "informational" and 520 or 320
+	-- Explanatory BlockHeader help carries guidance rather than the short label
+	-- of an item tooltip. Give it a readable line length and only contract when
+	-- the player's safe viewport genuinely cannot provide that width.
+	local defaultWidth = profile == "informational" and 680 or 320
 	local viewportMargin = profile == "informational" and 32 or 0
 	local availableWidth = math.max(1, safe.w - viewportMargin)
 	local requestedWidth = math.max(120, tonumber(options.maxWidth) or defaultWidth)
