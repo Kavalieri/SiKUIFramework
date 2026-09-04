@@ -2,7 +2,7 @@ require "ISUI/ISPanel"
 require "SiK/UI/Metrics"
 require "SiK/UI/Layout"
 require "SiK/UI/Theme"
-require "SiK/UI/Block"
+require "SiK/UI/Container"
 require "SiK/UI/Scroll"
 require "SiK/UI/VirtualList"
 require "SiK/UI/Controls"
@@ -30,10 +30,105 @@ local function createPanel(parent)
 	return panel
 end
 
+-- Table is a terminal widget, not a visual container.  Its private root only
+-- establishes a local coordinate system inside the declarative Block that
+-- owns it; it must never introduce another frame, background or padding.
+local function createTableRoot(options)
+	local container, reason = SiK.UI.Container.create({
+		parent = options.parent,
+		x = options.x or 0, y = options.y or 0,
+		w = options.w or options.width or 0,
+		h = options.h or options.height or 0,
+		padding = 0, background = false, border = false,
+		playerNum = options.playerNum, controlId = "table",
+	})
+	if not container then return nil, reason end
+	local root = {
+		panel = container.panel, container = container,
+		x = options.x or 0, y = options.y or 0,
+		w = options.w or options.width or 0,
+		h = options.h or options.height or 0,
+		contentHeight = 0, listeners = {}, disposed = false,
+	}
+	root.panel._sikUiComponent = "table"
+
+	function root:_sync(reasonId)
+		if self.disposed then return end
+		SiK.UI.Layout.apply(self.panel, { x = self.x, y = self.y, w = self.w, h = self.h })
+		local base = SiK.UI.Metrics.blockRects(self.w, self.h, false, 0, 0)
+		local overflow = self.contentHeight > base.h
+		self.contentRect, self.trackRect = SiK.UI.Metrics.blockRects(
+			self.w, self.h, overflow, 0, 0)
+		for index = 1, #self.listeners do self.listeners[index](reasonId or "sync") end
+	end
+
+	function root:getContentRect()
+		local rect = self.contentRect or { x = 0, y = 0, w = self.w, h = self.h }
+		return { x = rect.x, y = rect.y, w = rect.w, h = rect.h }
+	end
+
+	function root:getTrackRect()
+		local rect = self.trackRect
+		return rect and { x = rect.x, y = rect.y, w = rect.w, h = rect.h } or nil
+	end
+
+	function root:setBounds(x, y, w, h)
+		if self.disposed then return nil, "disposed" end
+		self.x, self.y = tonumber(x) or self.x, tonumber(y) or self.y
+		self.w, self.h = math.max(0, tonumber(w) or self.w), math.max(0, tonumber(h) or self.h)
+		self:_sync("bounds")
+		return self
+	end
+
+	function root:setContentHeight(height)
+		if self.disposed then return nil, "disposed" end
+		self.contentHeight = math.max(0, tonumber(height) or 0)
+		self:_sync("content")
+		return self
+	end
+
+	function root:subscribe(listener)
+		if type(listener) ~= "function" then return nil, "invalid_listener" end
+		self.listeners[#self.listeners + 1] = listener
+		return listener
+	end
+
+	function root:unsubscribe(listener)
+		for index = 1, #self.listeners do
+			if self.listeners[index] == listener then table.remove(self.listeners, index); return true end
+		end
+		return false
+	end
+
+	function root:dispose()
+		if self.disposed then return false end
+		self.disposed = true
+		self.listeners = {}
+		if self.container then self.container:dispose() end
+		self.container, self.panel = nil, nil
+		return true
+	end
+
+	root:_sync("create")
+	return root
+end
+
 local function detach(parent, child)
 	if not child then return end
 	if parent and parent.removeChild then parent:removeChild(child) end
 	if child.removeFromUIManager then child:removeFromUIManager() end
+end
+
+local function isBlockContent(parent)
+	local current, depth = parent, 0
+	while type(current) == "table" and depth < 64 do
+		if current._sikUiComponent == "block"
+			or current._sikUiComponent == "blockContent"
+			or current._sikUiBlockContent == true then return true end
+		current = current.parent
+		depth = depth + 1
+	end
+	return false
 end
 
 local function validColumns(columns)
@@ -749,10 +844,10 @@ end
 function TableInstance:_syncGeometry()
 	if self.disposed then return end
 	local visiblePagerHeight = reservedPagerHeight(self)
-	local content = self.block:getContentRect()
+	local content = self.root:getContentRect()
 	local signature = table.concat({ tostring(content.x), tostring(content.y),
-		tostring(content.w), tostring(content.h), tostring(self.block.w),
-		tostring(self.block.h), tostring(self.blockHeaderHeight),
+		tostring(content.w), tostring(content.h), tostring(self.root.w),
+		tostring(self.root.h), tostring(self.blockHeaderHeight),
 		tostring(self.metrics.headerHeight), tostring(visiblePagerHeight),
 		tostring(#self.projectedRows) }, ":")
 	if self._geometrySignature == signature then return self end
@@ -766,16 +861,16 @@ function TableInstance:_syncGeometry()
 	end
 	SiK.UI.Layout.apply(self.header, { x = content.x, y = y, w = content.w, h = self.metrics.headerHeight })
 	local rowsY = y + self.metrics.headerHeight
-	local rowsBottom = self.block.h - padding
+	local rowsBottom = self.root.h - padding
 	if visiblePagerHeight > 0 then
-		SiK.UI.Layout.apply(self.pager, { x = content.x, y = self.block.h - padding - visiblePagerHeight,
+		SiK.UI.Layout.apply(self.pager, { x = content.x, y = self.root.h - padding - visiblePagerHeight,
 			w = content.w, h = visiblePagerHeight })
 		self.pagerPrevX, self.pagerNextX = math.max(4, content.w / 2 - 40), math.min(content.w - 4, content.w / 2 + 40)
-		rowsBottom = self.block.h - padding - visiblePagerHeight
+		rowsBottom = self.root.h - padding - visiblePagerHeight
 	end
 	local rowsRect = { x = content.x, y = rowsY, w = content.w,
 		h = math.max(0, rowsBottom - rowsY) }
-	local trackRect = self.block:getTrackRect()
+	local trackRect = self.root:getTrackRect()
 	if trackRect then
 		trackRect.y = rowsRect.y
 		trackRect.h = rowsRect.h
@@ -806,8 +901,8 @@ end
 function TableInstance:_applyAutoHeight()
 	if not self.autoHeight or self.disposed then return self end
 	local height = self:getRequiredHeight()
-	if self.block.h ~= height then
-		self.block:setBounds(self.block.x, self.block.y, self.block.w, height)
+	if self.root.h ~= height then
+		self.root:setBounds(self.root.x, self.root.y, self.root.w, height)
 	end
 	return self
 end
@@ -819,7 +914,7 @@ function TableInstance:_refreshRows(preserveOffset)
 	if self.pager then self.pager:setVisible(reservedPagerHeight(self) > 0) end
 	local chromeHeight = self.blockHeaderHeight + self.blockHeaderGap
 		+ self.metrics.headerHeight + reservedPagerHeight(self)
-	self.block:setContentHeight(chromeHeight + #projected * self.metrics.rowHeight)
+	self.root:setContentHeight(chromeHeight + #projected * self.metrics.rowHeight)
 	self:_applyAutoHeight()
 	if self.emptyPanel then self.emptyPanel:setVisible(#projected == 0) end
 	local result, reason = self.list:setData(projected, preserveOffset == true)
@@ -847,15 +942,15 @@ end
 
 function TableInstance:setBounds(x, y, w, h)
 	if self.disposed then return nil, "disposed" end
-	self.block:setBounds(x, y, w, h)
+	self.root:setBounds(x, y, w, h)
 	return self
 end
 
 function TableInstance:getBounds()
-	return { x = self.block.x, y = self.block.y, w = self.block.w, h = self.block.h }
+	return { x = self.root.x, y = self.root.y, w = self.root.w, h = self.root.h }
 end
 
-function TableInstance:getHeight() return self.block.h end
+function TableInstance:getHeight() return self.root.h end
 
 function TableInstance:layout(spec)
 	if self.disposed then return nil, "disposed" end
@@ -1115,20 +1210,20 @@ function TableInstance:dispose()
 	if self.disposed then return false end
 	self.disposed = true
 	if self.header and self.header.setCapture then self.header:setCapture(false) end
-	if self.blockListener then self.block:unsubscribe(self.blockListener) end
+	if self.rootListener then self.root:unsubscribe(self.rootListener) end
 	if self.list then self.list:dispose() end
 	if self.scroll then self.scroll:dispose() end
-	detach(self.block and self.block.panel, self.header)
+	detach(self.root and self.root.panel, self.header)
 	if self.blockHeader and self.blockHeader.dispose then self.blockHeader:dispose() end
-	detach(self.block and self.block.panel, self.pager)
-	detach(self.block and self.block.panel, self.emptyPanel)
-	if self.block then self.block:dispose() end
+	detach(self.root and self.root.panel, self.pager)
+	detach(self.root and self.root.panel, self.emptyPanel)
+	if self.root then self.root:dispose() end
 	self.rows, self.projectedRows, self.expanded = {}, {}, {}
 	self.semanticById, self.parentByKey, self.childPages, self.childPageStates = {}, {}, {}, {}
 	self.semanticSelections = {}
 	self.semanticSelection = nil
 	self.list, self.scroll, self.header, self.blockHeader = nil, nil, nil, nil
-	self.pager, self.emptyPanel, self.block = nil, nil, nil
+	self.pager, self.emptyPanel, self.root = nil, nil, nil
 	return true
 end
 
@@ -1205,6 +1300,12 @@ end
 function Table.create(options)
 	options = options or {}
 	if type(options.parent) ~= "table" then return nil, "invalid_parent" end
+	-- A caller cannot opt into a fake embedded mode.  The physical ancestry is
+	-- the contract: without a real declarative Block content host, no table is
+	-- created and therefore no orphan panel can be painted.
+	if options.embedded ~= true or not isBlockContent(options.parent) then
+		return nil, "table_requires_block"
+	end
 	if not validColumns(options.columns) then return nil, "invalid_columns" end
 	if options.expansion ~= nil and (type(options.expansion) ~= "table"
 		or type(options.expansion.childrenOf) ~= "function") then return nil, "invalid_expansion" end
@@ -1216,47 +1317,27 @@ function Table.create(options)
 		return nil, "invalid_external_pagination"
 	end
 	local metrics, tokens = Table.metrics(options), SiK.UI.Metrics.tokens(options.metrics)
-	local embedded = options.embedded == true
-	local paddingX = embedded and 0 or numberOr(options.paddingX, tokens.block.padding)
-	local paddingY = embedded and 0 or numberOr(options.paddingY, tokens.block.padding)
-	local blockBackground = options.background
-	local blockBorder = options.border
-	if embedded then
-		blockBackground = false
-		blockBorder = false
-	end
-	local blockHeaderSpec, blockHeaderHeight = resolveBlockHeader(options)
-	local blockHeaderGap = blockHeaderSpec and tokens.spacing.md or 0
+	local paddingX, paddingY = 0, 0
+	local blockHeaderSpec, blockHeaderHeight, blockHeaderGap = nil, 0, 0
 	local pagerHeight = options.pagination and math.max(1, numberOr(options.pagination.height, tokens.table.pagerHeight)) or 0
-	local block, reason = SiK.UI.Block.create({ parent = options.parent, x = options.x, y = options.y,
-		w = options.w or options.width, h = options.h or options.height,
-		-- Header, rows and pager are positioned by TableInstance itself. Reserving
-		-- them again in Block shortens the same viewport a second time and leaves
-		-- an apparent empty framed block under short embedded tables.
-		reservedTop = 0, reservedBottom = 0,
-		contentHeight = 0, metrics = options.metrics,
-		variant = embedded and "transparent" or options.variant,
-		paddingX = paddingX, paddingY = paddingY,
-		background = blockBackground,
-		border = blockBorder,
-		fill = not embedded and options.fill == true, scrollable = true })
-	if not block then return nil, reason end
-	local header = createPanel(block.panel)
-	local blockHeader = blockHeaderSpec and SiK.UI.Controls.blockHeader(block.panel, blockHeaderSpec) or nil
-	local pager = options.pagination and createPanel(block.panel) or nil
-	local emptyPanel = options.emptyText and createPanel(block.panel) or nil
-	local scroll, scrollReason = SiK.UI.Scroll.create({ parent = block.panel,
-		viewportRect = block:getContentRect(), trackRect = block:getTrackRect(), wheelStep = options.wheelStep,
+	local root, reason = createTableRoot(options)
+	if not root then return nil, reason end
+	local header = createPanel(root.panel)
+	local blockHeader = blockHeaderSpec and SiK.UI.Controls.blockHeader(root.panel, blockHeaderSpec) or nil
+	local pager = options.pagination and createPanel(root.panel) or nil
+	local emptyPanel = options.emptyText and createPanel(root.panel) or nil
+	local scroll, scrollReason = SiK.UI.Scroll.create({ parent = root.panel,
+		viewportRect = root:getContentRect(), trackRect = root:getTrackRect(), wheelStep = options.wheelStep,
 		contentHeight = 0, playerNum = options.playerNum })
-	if not scroll then detach(block.panel, header)
+	if not scroll then detach(root.panel, header)
 		if blockHeader and blockHeader.dispose then blockHeader:dispose() end
-		detach(block.panel, pager)
-		detach(block.panel, emptyPanel)
-		block:dispose() return nil, scrollReason end
+		detach(root.panel, pager)
+		detach(root.panel, emptyPanel)
+		root:dispose() return nil, scrollReason end
 	-- Empty feedback overlays the viewport only while the data source is empty.
-	if emptyPanel and block.panel.removeChild and block.panel.addChild then
-		block.panel:removeChild(emptyPanel)
-		block.panel:addChild(emptyPanel)
+	if emptyPanel and root.panel.removeChild and root.panel.addChild then
+		root.panel:removeChild(emptyPanel)
+		root.panel:addChild(emptyPanel)
 	end
 	-- Table owns the viewport below its header and above its pager.  Attaching
 	-- this internal Scroll to Block makes Block:_sync() reset it to the whole
@@ -1270,7 +1351,7 @@ function Table.create(options)
 	local minimumHeight = math.max(0, numberOr(options.minHeight, 0))
 	local maximumHeight = tonumber(options.maxHeight)
 	if maximumHeight then maximumHeight = math.max(minimumHeight, maximumHeight) end
-		local instance = setmetatable({ block = block, scroll = scroll, header = header,
+		local instance = setmetatable({ root = root, scroll = scroll, header = header,
 		blockHeader = blockHeader, pager = pager, emptyPanel = emptyPanel,
 		columns = options.columns, columnLayout = {},
 		columnOptions = { font = metrics.font, rowHeight = metrics.rowHeight,
@@ -1300,7 +1381,7 @@ function Table.create(options)
 		onColumnResize = options.onColumnResize, onSort = type(options.onSort) == "function" and options.onSort or nil,
 		playerNum = math.max(0, math.floor(numberOr(options.playerNum, 0))),
 				disposed = false, _sikUiComponent = "table" }, TableInstance)
-		block.panel._sikUiTable = instance
+		root.panel._sikUiTable = instance
 		header._sikUiComponent = "tableHeader"
 		scroll.viewport._sikUiComponent = "tableViewport"
 		scroll.host._sikUiComponent = "tableRows"
@@ -1322,7 +1403,7 @@ function Table.create(options)
 				math.max(0, math.floor((panel.height - metrics.fontHeight) / 2)), r, g, b, a, metrics.font) end
 		end
 		emptyPanel._sikEmptyText = tostring(options.emptyText)
-		SiK.UI.Layout.apply(emptyPanel, block:getContentRect())
+		SiK.UI.Layout.apply(emptyPanel, root:getContentRect())
 		emptyPanel:setVisible(false)
 	end
 	local list, listReason = SiK.UI.VirtualList.create({ scroll = scroll, rowHeight = metrics.rowHeight,
@@ -1407,13 +1488,13 @@ function Table.create(options)
 				return adapter.onRightClick(instance:_rowContext(context.row, context)) == true
 			end,
 		} })
-	if not list then scroll:dispose() detach(block.panel, header)
+	if not list then scroll:dispose() detach(root.panel, header)
 		if blockHeader and blockHeader.dispose then blockHeader:dispose() end
-		detach(block.panel, pager) detach(block.panel, emptyPanel)
-		block:dispose() return nil, listReason end
+		detach(root.panel, pager) detach(root.panel, emptyPanel)
+		root:dispose() return nil, listReason end
 	instance.list = list
-	instance.blockListener = function() instance:_syncGeometry() end
-	block:subscribe(instance.blockListener)
+	instance.rootListener = function() instance:_syncGeometry() end
+	root:subscribe(instance.rootListener)
 	instance:_syncGeometry()
 	local ok, rowsReason = instance:setRows(options.rows or {}, options.preserveOffset == true)
 	if not ok then instance:dispose() return nil, rowsReason end

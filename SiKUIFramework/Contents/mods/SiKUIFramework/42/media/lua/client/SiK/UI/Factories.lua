@@ -246,7 +246,7 @@ local function tableFactory(parent, props, context)
         if type(model.expanded) == "table" then instance.expanded = model.expanded end
         if type(model.selectedKeys) == "table" then instance:setSelectedKeys(model.selectedKeys) end
         if model.scrollOffset ~= nil then instance:setScrollOffset(model.scrollOffset) end
-        instance.panel, instance.actionTarget = instance.block.panel, instance.list
+		instance.panel, instance.actionTarget = instance.root.panel, instance.list
         return instance
 end
 

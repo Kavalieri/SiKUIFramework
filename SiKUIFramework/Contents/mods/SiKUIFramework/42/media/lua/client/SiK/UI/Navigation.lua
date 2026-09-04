@@ -280,7 +280,22 @@ function Navigation.create(options)
 		itemExtent = options.itemExtent, iconSize = options.iconSize,
 		iconFit = options.iconFit or "contain", iconPadding = options.iconPadding,
 		iconOnly = options.iconOnly, tooltipMode = options.tooltipMode,
+		tooltipSide = options.tooltipSide, tooltipGap = options.tooltipGap,
+		tooltipBackgroundColor = options.tooltipBackgroundColor,
+		tooltipBorderColor = options.tooltipBorderColor,
+		tooltipTextColor = options.tooltipTextColor,
 		selectionStyle = options.selectionStyle, separator = options.separator,
+		separatorOffset = options.separatorOffset,
+		backgroundColor = options.backgroundColor,
+		selectedBackgroundColor = options.selectedBackgroundColor,
+		hoverBackgroundColor = options.hoverBackgroundColor,
+		pressedBackgroundColor = options.pressedBackgroundColor,
+		borderColor = options.borderColor,
+		selectedBorderColor = options.selectedBorderColor,
+		iconColor = options.iconColor, hoverIconColor = options.hoverIconColor,
+		selectedIconColor = options.selectedIconColor,
+		hoverIconScale = options.hoverIconScale,
+		separatorColor = options.separatorColor,
 		onActivate = function(context)
 			local item = context and context.value
 			if item and item.key then instance.activeKey = item.key end

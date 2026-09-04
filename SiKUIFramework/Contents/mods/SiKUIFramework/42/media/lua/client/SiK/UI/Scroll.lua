@@ -246,6 +246,12 @@ local function createPanel(x, y, w, h)
         local panel = ISPanel:new(x, y, w, h)
         panel:initialise()
         if panel.instantiate then panel:instantiate() end
+	-- Viewport, content host and scrollbar track are structural layers.  A raw
+	-- ISPanel carries visual defaults, which made these helpers paint empty
+	-- framed rectangles behind their owner's content.
+	panel.drawBackground = false
+	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
         if panel.setScrollWithParent then panel:setScrollWithParent(false) end
         if panel.setScrollChildren then panel:setScrollChildren(false) end
         return panel
