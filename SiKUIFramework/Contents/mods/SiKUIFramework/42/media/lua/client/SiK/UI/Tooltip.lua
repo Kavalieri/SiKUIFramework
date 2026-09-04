@@ -125,14 +125,22 @@ function Tooltip.renderSection(panel, section, x, y, width, options)
 		})
 	end
 	local cursor = y + measured.paddingY
+	local align = section.align or options.align
+	local function draw(value, drawY, drawColor)
+		if align == "right" and panel.drawTextRight then
+			panel:drawTextRight(value, x + measured.width - measured.paddingX, drawY,
+				drawColor.r, drawColor.g, drawColor.b, drawColor.a, measured.font)
+		else
+			panel:drawText(value, x + measured.paddingX, drawY,
+				drawColor.r, drawColor.g, drawColor.b, drawColor.a, measured.font)
+		end
+	end
 	if measured.title ~= "" then
-		panel:drawText(measured.title, x + measured.paddingX, cursor,
-			color.r, color.g, color.b, color.a, measured.font)
+		draw(measured.title, cursor, color)
 		cursor = cursor + measured.lineHeight + (#measured.lines > 0 and measured.gap or 0)
 	end
 	for _, line in ipairs(measured.lines) do
-		panel:drawText(line, x + measured.paddingX, cursor,
-			lineColor.r, lineColor.g, lineColor.b, lineColor.a, measured.font)
+		draw(line, cursor, lineColor)
 		cursor = cursor + measured.lineHeight
 	end
 	return measured
@@ -361,18 +369,40 @@ local function transientPanel(options)
 	local defaultWidth = profile == "informational" and 680 or 320
 	local viewportMargin = profile == "informational" and 32 or 0
 	local availableWidth = math.max(1, safe.w - viewportMargin)
-	local requestedWidth = math.max(120, tonumber(options.maxWidth) or defaultWidth)
+	local requestedWidth
+	if profile == "option" then
+		local text = tostring(content.text or options.text or "")
+		local manager = type(getTextManager) == "function" and getTextManager() or nil
+		local textWidth = manager and manager.MeasureStringX
+			and manager:MeasureStringX(UIFont.Small, text) or #text * 8
+		local paddingX = math.max(0, tonumber(options.paddingX) or 8)
+		requestedWidth = textWidth + paddingX * 2
+	else
+		requestedWidth = math.max(120, tonumber(options.maxWidth) or defaultWidth)
+	end
 	local width = math.max(1, math.min(requestedWidth, availableWidth))
 	local document = Tooltip.createDocument({ sections = { {
 		title = content.title, text = content.text or options.text,
 		tone = content.tone or options.tone, framed = false,
+		align = profile == "option" and "right" or content.align,
 	} } })
 	local measured = document:measure(width)
 	local panel = ISPanel:new(0, 0, measured.width, math.min(measured.height, math.max(1, safe.h)))
 	panel:initialise()
 	panel._sikTooltipDocument = document
 	panel.prerender = function(self)
-		Tooltip.renderFrame(self, 0, 0, self.width, self.height, options)
+		local frameOptions = options
+		if profile == "option" and options.backgroundColor == nil then
+			local theme = SiK.UI.Theme.tokens(options.theme)
+			frameOptions = {
+				theme = options.theme,
+				backgroundColor = { r = theme.surface.r, g = theme.surface.g,
+					b = theme.surface.b, a = 0.72 },
+				borderColor = options.borderColor,
+				border = options.border,
+			}
+		end
+		Tooltip.renderFrame(self, 0, 0, self.width, self.height, frameOptions)
 		document:render(self, 0, 0, self.width, { backgroundColor = { a = 0 }, border = false })
 	end
 	local previousDispose = panel.dispose

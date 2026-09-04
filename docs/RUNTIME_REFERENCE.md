@@ -512,7 +512,7 @@ client/host/dedicated runtime validation of a consuming product surface.
 ### Composite blocks and atomic cards
 
 `SiK.UI.Card` is terminal content with named data slots and never hosts child
-widgets. Use `SiK.UI.Block.create({ title = ..., variant = "section",
-contentHost = true })` when a bordered section must contain controls. The
-returned Block owns `header` and one measured `content` host; both reflow from
-the same canonical content rectangle.
+widgets. Use `SiK.UI.Block.create({ title = ..., variant = "section" })` when a
+bordered section must contain controls. A Block is itself the container: every
+child widget or nested container is parented directly to `block.panel` and is
+laid out inside `block:getContentRect()`. No intermediate content panel exists.

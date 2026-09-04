@@ -443,11 +443,9 @@ end
 local function childArea(handle, fallback)
         if type(handle) ~= "table" then return fallback end
         local host = handle.childParent
-        -- Composite controls such as Block already position their dedicated
-        -- content host at the padded/header-adjusted content rectangle. Children
-        -- are parented to that host, therefore their coordinate origin is (0,0).
-        -- Returning the block-local content rectangle here applied the inset a
-        -- second time and let descendants escape their apparent container.
+	-- Composite controls with a real navigation or scrolling host expose a
+	-- separate local coordinate system. Ordinary containers and Blocks do not:
+	-- their children remain direct children and use the parent's content rect.
         if type(host) == "table" and host ~= handle.panel then
                 return { x = 0, y = 0, w = math.max(1, n(host.width, fallback.w)),
                         h = math.max(1, n(host.height, fallback.h)) }
@@ -625,7 +623,6 @@ local function recordHandle(handle, node, tree, props, owned, placement, adopted
 	tag(handle.panel)
 	tag(handle.body, "/body")
 	tag(handle.header, "/header")
-	tag(handle.content, "/content")
 	tag(handle.childParent, "/children")
 	tree.nodes[node.id] = handle
 	tree.order[#tree.order + 1] = handle

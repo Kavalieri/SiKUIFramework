@@ -1,8 +1,8 @@
 name=SiK UI Framework
 id=SiKUIFramework
-description=Build 42.20+ v1.0.0-dev1.15. Standalone typed UI composition and lifecycle framework for SiK mods and external consumers.
+description=Build 42.20+ v1.0.0-dev1.17. Standalone typed UI composition and lifecycle framework for SiK mods and external consumers.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.0.0-dev1.16
+modversion=1.0.0-dev1.17
 versionMin=42.20.0

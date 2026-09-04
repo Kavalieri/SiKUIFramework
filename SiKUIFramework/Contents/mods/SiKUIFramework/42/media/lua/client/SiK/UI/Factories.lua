@@ -262,7 +262,6 @@ local function blockFactory(parent, props, context)
 	options.info = options.tooltip and headerCapability["info-visible"] ~= false
 		and { tooltip = options.tooltip } or nil
 	options.actions = headerActions
-	options.contentHost = props.contentHost ~= false
 	options.paddingX = props.paddingX or props.padding
 	options.paddingY = props.paddingY or props.padding
 	options.headerHeight = props.headerHeight

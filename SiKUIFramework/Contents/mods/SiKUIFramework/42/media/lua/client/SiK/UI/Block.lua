@@ -29,22 +29,6 @@ local function numberOr(value, fallback)
 	return value
 end
 
-local function reflowNestedContainers(host)
-	local children = host and host.childrenInOrder
-	if type(children) ~= "table" then return end
-	for index = 1, #children do
-		local child = children[index]
-		local nested = child and child._sikContainerInstance
-		if nested and nested.options and nested.options.fillParentWidth == true
-			and type(nested.reflow) == "function" then
-			local x = numberOr(child.x, 0)
-			nested:reflow({ x = x, y = numberOr(child.y, 0),
-				w = math.max(1, numberOr(host.width, 0) - x),
-				h = math.max(1, numberOr(child.height, 1)) })
-		end
-	end
-end
-
 local function instanceRects(instance, overflow)
 	return SiK.UI.Metrics.blockRects(instance.w, instance.h, overflow,
 		instance.reservedTop, instance.reservedBottom, instance.metrics,
@@ -168,12 +152,6 @@ function BlockInstance:_sync(reason)
 			y = self.headerY, w = self.contentRect.w, h = self.headerHeight })
 		if self.header.reflow then self.header:reflow(self.contentRect.w) end
 	end
-	if self.content then
-		SiK.UI.Layout.apply(self.content, self.contentRect)
-		-- A Block owns the final content rectangle. Propagate it to nested
-		-- full-width framework containers in the same synchronous pass.
-		reflowNestedContainers(self.content)
-	end
 	if self.scroll and not self.scroll.disposed then
 		if type(self.scroll.update) == "function" then
 			self.scroll:update({ viewportRect = self.contentRect,
@@ -282,7 +260,6 @@ function BlockInstance:dispose()
 	self.scroll = nil
 	self.listeners = {}
 	self.header = nil
-	self.content = nil
 	if self.container then self.container:dispose(); self.container = nil end
 	self.panel = nil
 	self.parent = nil
@@ -353,18 +330,6 @@ function Block.create(options)
 			playerNum = options.playerNum,
 			onActivate = options.onActivate,
 		})
-	end
-	if options.contentHost == true or hasHeader then
-		instance.content = SiK.UI.Controls.panel(panel, {
-			x = 0, y = 0, w = 1, h = 1,
-			controlId = "blockContent", playerNum = options.playerNum,
-		})
-		instance.content.drawBackground = false
-		instance.content.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-		instance.content.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-		instance.content._sikUiComponent = "blockContent"
-		instance.content._sikUiBlock = instance
-		instance.childParent = instance.content
 	end
 	instance:_sync("create")
 	return instance
