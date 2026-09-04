@@ -1,0 +1,9 @@
+VERSION = 1,
+
+option SiKUIFramework.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = SiKUIFramework_Debug,
+	translation = SiKUIFramework_DebugMode,
+}

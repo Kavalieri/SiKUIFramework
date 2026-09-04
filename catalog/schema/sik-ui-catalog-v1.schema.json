@@ -1,0 +1,615 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sik-ui.dev/schema/sik-ui-catalog-v1.schema.json",
+  "title": "SiK UI declarative catalog v1",
+  "oneOf": [
+    { "$ref": "#/$defs/frameworkManifest" },
+    { "$ref": "#/$defs/productSurfaceSpec" },
+    { "$ref": "#/$defs/runtimeSurfaceArtifact" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$"
+    },
+    "propIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][A-Za-z0-9]*(?:[._:-][a-z0-9][A-Za-z0-9]*)*$"
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "scalar": {
+      "type": ["string", "number", "boolean", "null"]
+    },
+    "bindingValue": {
+      "oneOf": [
+        { "$ref": "#/$defs/scalar" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "literal" },
+            "value": { "$ref": "#/$defs/scalar" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "enum": ["i18n", "asset", "token"] },
+            "ref": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "enum": ["data", "state"] },
+            "path": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" }
+          }
+        }
+      ]
+    },
+    "propBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "$ref": "#/$defs/propIdentifier" },
+        "value": { "$ref": "#/$defs/bindingValue" }
+      }
+    },
+    "actionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "actionId"],
+      "properties": {
+        "event": { "$ref": "#/$defs/identifier" },
+        "actionId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "capabilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "props"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/propBinding" } }
+      }
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "labelRef", "align"],
+      "oneOf": [
+        { "required": ["width"], "not": { "anyOf": [{ "required": ["flex"] }, { "required": ["min"] }] } },
+        { "required": ["flex", "min"], "not": { "required": ["width"] } }
+      ],
+      "properties": {
+        "key": { "$ref": "#/$defs/identifier" },
+        "labelRef": { "$ref": "#/$defs/identifier" },
+        "align": { "enum": ["left", "center", "right"] },
+        "width": { "type": "integer", "minimum": 24 },
+        "flex": { "type": "number", "exclusiveMinimum": 0 },
+        "min": { "type": "integer", "minimum": 24 }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "labelRef", "value"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "labelRef": { "$ref": "#/$defs/identifier" },
+        "value": { "$ref": "#/$defs/scalar" },
+        "contentId": { "$ref": "#/$defs/identifier" },
+        "surfaceRef": { "$ref": "#/$defs/identifier" },
+        "iconRef": { "$ref": "#/$defs/identifier" },
+        "disabled": { "type": "boolean" },
+        "reasonRef": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "layoutBindingDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "valueKinds"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "valueKinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["number", "string", "boolean", "token", "data"] }
+        }
+      }
+    },
+    "layoutContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modes", "bindings"],
+      "properties": {
+        "modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "bindings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/layoutBindingDefinition" } }
+      }
+    },
+    "layoutOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "bindings"],
+      "properties": {
+        "profileId": { "$ref": "#/$defs/identifier" },
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/propBinding" } }
+      }
+    },
+    "nodeLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "base", "overrides"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/identifier" },
+        "base": { "type": "array", "items": { "$ref": "#/$defs/propBinding" } },
+        "overrides": { "type": "array", "items": { "$ref": "#/$defs/layoutOverride" } }
+      }
+    },
+    "nodeVisual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibleWhen"],
+      "properties": {
+        "visibleWhen": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "nodeStateView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentId", "values"],
+      "properties": {
+        "contentId": { "$ref": "#/$defs/identifier" },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "nodeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "options", "views"],
+      "properties": {
+        "default": { "$ref": "#/$defs/identifier" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "views": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nodeStateView" }
+        }
+      }
+    },
+    "componentNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "variant", "layout", "props", "actions", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/identifier" },
+        "variant": { "$ref": "#/$defs/identifier" },
+        "layout": { "$ref": "#/$defs/nodeLayout" },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/propBinding" } },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/actionBinding" } },
+        "visual": { "$ref": "#/$defs/nodeVisual" },
+        "state": { "$ref": "#/$defs/nodeState" },
+        "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capabilityBinding" } },
+        "columns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/column" } },
+        "options": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/option" } },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/componentNode" } }
+      }
+    },
+    "rootNode": {
+      "allOf": [
+        { "$ref": "#/$defs/componentNode" },
+        {
+          "type": "object",
+          "properties": {
+            "children": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/componentNode" } }
+          }
+        }
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "minViewportWidth", "minViewportHeight", "safeArea"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "minViewportWidth": { "type": "integer", "minimum": 0 },
+        "minViewportHeight": { "type": "integer", "minimum": 0 },
+        "safeArea": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "value", "runtime"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["number", "color", "string"] },
+        "value": { "$ref": "#/$defs/scalar" },
+        "runtime": { "type": "boolean" }
+      }
+    },
+    "propDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "required"],
+      "properties": {
+        "name": { "$ref": "#/$defs/propIdentifier" },
+        "kind": { "enum": ["string", "number", "boolean", "i18n", "asset", "token", "data"] },
+        "required": { "type": "boolean" },
+        "default": { "$ref": "#/$defs/scalar" },
+        "enum": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/scalar" } }
+      }
+    },
+    "componentDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "runtimeFactory", "htmlTag", "htmlClass", "events", "allowedChildren", "props", "supportsColumns", "supportsOptions", "editorGroup"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "runtimeFactory": { "$ref": "#/$defs/symbol" },
+        "htmlTag": { "enum": ["div", "section", "header", "footer", "nav", "button", "label", "input"] },
+        "htmlClass": { "type": "string", "pattern": "^sik-[a-z0-9-]+$" },
+        "events": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "allowedChildren": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/propDefinition" } },
+        "supportsColumns": { "type": "boolean" },
+        "supportsOptions": { "type": "boolean" },
+        "editorGroup": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "componentType", "props"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "componentType": { "$ref": "#/$defs/identifier" },
+        "props": { "type": "array", "items": { "$ref": "#/$defs/propDefinition" } }
+      }
+    },
+    "frameworkManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentKind", "schemaId", "schemaVersion", "framework", "events", "profiles", "tokens", "layout", "capabilities", "components"],
+      "properties": {
+        "documentKind": { "const": "framework-manifest" },
+        "schemaId": { "const": "sik-ui-catalog-v1" },
+        "schemaVersion": { "const": 1 },
+        "framework": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "namespace", "manifestVersion"],
+          "properties": {
+            "id": { "const": "SiKUIFramework" },
+            "namespace": { "const": "SiK.UI" },
+            "manifestVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9.]+)?$" }
+          }
+        },
+        "events": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "profiles": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/profile" } },
+        "tokens": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/token" } },
+        "layout": { "$ref": "#/$defs/layoutContract" },
+        "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" } },
+        "components": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/componentDefinition" } }
+      }
+    },
+    "moduleReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "modulePath", "symbol"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/identifier" },
+        "modulePath": { "$ref": "#/$defs/relativePath" },
+        "symbol": { "$ref": "#/$defs/symbol" }
+      }
+    },
+    "surfaceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "specPath", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "repository": { "$ref": "#/$defs/identifier" },
+        "specPath": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourcePath", "runtimePath", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sourcePath": { "$ref": "#/$defs/relativePath" },
+        "runtimePath": { "allOf": [{ "$ref": "#/$defs/relativePath" }, { "pattern": "^media/" }] },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runtimeAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "valueContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["string", "number", "boolean", "object", "array", "any"] },
+        "nullable": { "type": "boolean" },
+        "properties": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "required", "schema"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" },
+              "required": { "type": "boolean" },
+              "schema": { "$ref": "#/$defs/valueContract" }
+            }
+          }
+        },
+        "items": { "$ref": "#/$defs/valueContract" }
+      }
+    },
+    "pathContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "schema"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]*$" },
+        "schema": { "$ref": "#/$defs/valueContract" }
+      }
+    },
+    "actionPayloadContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actionId", "event", "payload"],
+      "properties": {
+        "actionId": { "$ref": "#/$defs/identifier" },
+        "event": { "$ref": "#/$defs/identifier" },
+        "payload": { "$ref": "#/$defs/valueContract" }
+      }
+    },
+    "surfaceContracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "state", "actionPayloads"],
+      "properties": {
+        "data": { "type": "array", "items": { "$ref": "#/$defs/pathContract" } },
+        "state": { "type": "array", "items": { "$ref": "#/$defs/pathContract" } },
+        "actionPayloads": { "type": "array", "items": { "$ref": "#/$defs/actionPayloadContract" } }
+      }
+    },
+    "runtimeLoader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "modulePath", "symbol", "builderSymbol"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/identifier" },
+        "modulePath": { "$ref": "#/$defs/relativePath" },
+        "symbol": { "$ref": "#/$defs/symbol" },
+        "builderSymbol": { "$ref": "#/$defs/symbol" }
+      }
+    },
+    "runtimeDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "loader", "callers"],
+      "properties": {
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "moduleId", "modulePath"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/identifier" },
+            "moduleId": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:/[A-Za-z_][A-Za-z0-9_]*)*$" },
+            "modulePath": { "$ref": "#/$defs/relativePath" }
+          }
+        },
+        "loader": { "$ref": "#/$defs/runtimeLoader" },
+        "callers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/moduleReference" } }
+      }
+    },
+    "translation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locale", "text"],
+      "properties": {
+        "locale": { "type": "string", "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$" },
+        "text": { "type": "string" }
+      }
+    },
+    "i18nEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "translations"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "translations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/translation" } }
+      }
+    },
+    "allowedAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "events"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "events": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } }
+      }
+    },
+    "visualBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["masterPath", "masterSha256", "selector", "canonicalizer", "subtreeSha256", "validation"],
+      "properties": {
+        "masterPath": { "$ref": "#/$defs/relativePath" },
+        "masterSha256": { "$ref": "#/$defs/sha256" },
+        "selector": { "type": "string", "pattern": "^\\[data-surface-id=(?:\\\"[a-z][a-z0-9-]*\\\"|'[a-z][a-z0-9-]*')\\]$" },
+        "canonicalizer": { "enum": ["sik-ui-visual-v1", "sik-ui-dom-v2"] },
+        "subtreeSha256": { "$ref": "#/$defs/sha256" },
+        "validation": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" }
+      }
+    },
+    "productSurfaceSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentKind", "schemaId", "schemaVersion", "frameworkRef", "visualBaseline", "product", "surface", "surfaceReferences", "assets", "i18n", "actionAllowlist", "contracts", "runtime"],
+      "properties": {
+        "documentKind": { "const": "product-surface-spec" },
+        "schemaId": { "const": "sik-ui-catalog-v1" },
+        "schemaVersion": { "const": 1 },
+        "frameworkRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "manifestSha256"],
+          "properties": {
+            "id": { "const": "SiKUIFramework" },
+            "manifestSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "visualBaseline": { "$ref": "#/$defs/visualBaseline" },
+        "product": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "namespace"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "namespace": { "$ref": "#/$defs/symbol" }
+          }
+        },
+        "surface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "owner", "callers", "profiles", "root"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "kind": { "enum": ["window", "embedded", "modal", "menu", "tooltip", "drag", "world-feedback"] },
+            "owner": { "$ref": "#/$defs/moduleReference" },
+            "callers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/moduleReference" } },
+            "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+            "root": { "$ref": "#/$defs/rootNode" }
+          }
+        },
+        "surfaceReferences": { "type": "array", "items": { "$ref": "#/$defs/surfaceReference" } },
+        "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+        "i18n": { "type": "array", "items": { "$ref": "#/$defs/i18nEntry" } },
+        "actionAllowlist": { "type": "array", "items": { "$ref": "#/$defs/allowedAction" } },
+        "contracts": { "$ref": "#/$defs/surfaceContracts" },
+        "runtime": { "$ref": "#/$defs/runtimeDeclaration" }
+      }
+    },
+    "runtimeSurfaceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentKind", "schemaId", "schemaVersion", "frameworkRef", "provenance", "profiles", "tokens", "componentFactories", "capabilities", "product", "surface", "surfaceReferences", "assets", "i18n", "actionAllowlist"],
+      "properties": {
+        "documentKind": { "const": "sik-ui-runtime-surface" },
+        "schemaId": { "const": "sik-ui-runtime-v1" },
+        "schemaVersion": { "const": 1 },
+        "frameworkRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "namespace", "manifestVersion", "manifestSha256"],
+          "properties": {
+            "id": { "const": "SiKUIFramework" },
+            "namespace": { "const": "SiK.UI" },
+            "manifestVersion": { "type": "string" },
+            "manifestSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaSha256", "frameworkManifestSha256", "surfaceSpecSha256", "generatorSha256", "visualMasterSha256", "visualSubtreeSha256", "visualCanonicalizer"],
+          "properties": {
+            "schemaSha256": { "$ref": "#/$defs/sha256" },
+            "frameworkManifestSha256": { "$ref": "#/$defs/sha256" },
+            "surfaceSpecSha256": { "$ref": "#/$defs/sha256" },
+            "generatorSha256": { "$ref": "#/$defs/sha256" },
+            "visualMasterSha256": { "$ref": "#/$defs/sha256" },
+            "visualSubtreeSha256": { "$ref": "#/$defs/sha256" },
+            "visualCanonicalizer": { "enum": ["sik-ui-visual-v1", "sik-ui-dom-v2"] }
+          }
+        },
+        "profiles": { "type": "array", "items": { "$ref": "#/$defs/profile" } },
+        "tokens": { "type": "array", "items": { "$ref": "#/$defs/token" } },
+        "componentFactories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["typeId", "runtimeFactory"],
+            "properties": {
+              "typeId": { "$ref": "#/$defs/identifier" },
+              "runtimeFactory": { "$ref": "#/$defs/symbol" }
+            }
+          }
+        },
+        "capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "product": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "namespace"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "namespace": { "$ref": "#/$defs/symbol" }
+          }
+        },
+        "surface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "owner", "callers", "profiles", "root"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "kind": { "enum": ["window", "embedded", "modal", "menu", "tooltip", "drag", "world-feedback"] },
+            "owner": { "$ref": "#/$defs/moduleReference" },
+            "callers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/moduleReference" } },
+            "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+            "root": { "$ref": "#/$defs/rootNode" }
+          }
+        },
+        "surfaceReferences": { "type": "array", "items": { "$ref": "#/$defs/surfaceReference" } },
+        "assets": { "type": "array", "items": { "$ref": "#/$defs/runtimeAsset" } },
+        "i18n": { "type": "array", "items": { "$ref": "#/$defs/i18nEntry" } },
+        "actionAllowlist": { "type": "array", "items": { "$ref": "#/$defs/allowedAction" } }
+      }
+    }
+  }
+}

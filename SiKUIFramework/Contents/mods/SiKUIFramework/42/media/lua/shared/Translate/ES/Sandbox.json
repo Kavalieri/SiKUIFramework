@@ -1,0 +1,5 @@
+{
+	"Sandbox_SiKUIFramework_Debug": "SiK UI Framework: diagnóstico",
+	"Sandbox_SiKUIFramework_DebugMode": "Diagnóstico de composición y ciclo de vida",
+	"Sandbox_SiKUIFramework_DebugMode_tooltip": "Registra eventos acotados del framework para montaje, visibilidad, geometría, árboles de componentes, solapes e interacción. No incluye datos internos de ningún mod consumidor."
+}

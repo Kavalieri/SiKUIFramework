@@ -1,0 +1,5 @@
+{
+	"Sandbox_SiKUIFramework_Debug": "SiK UI Framework: diagnostics",
+	"Sandbox_SiKUIFramework_DebugMode": "Composition and lifecycle diagnostics",
+	"Sandbox_SiKUIFramework_DebugMode_tooltip": "Writes bounded framework events for mounting, visibility, geometry, component trees, overlaps and interaction. It does not include internal data from any consumer mod."
+}

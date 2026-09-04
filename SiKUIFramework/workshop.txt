@@ -1,0 +1,6 @@
+version=1
+id=3794332103
+title=SiK UI Framework
+description=Reusable SiK UI framework for Project Zomboid Build 42.20+.
+tags=Build 42;Interface;QOL;Misc;Addons SiK
+visibility=public

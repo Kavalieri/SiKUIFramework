@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SiK UI Catalog Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header class="editor-toolbar">
+    <strong>SiK UI Catalog Editor</strong>
+    <label>Manifest <input id="manifest-file" type="file" accept="application/json"></label>
+    <label>Surface spec <input id="surface-file" type="file" accept="application/json"></label>
+    <button id="save-file" type="button">Guardar superficie</button>
+    <button id="export-file" type="button">Exportar superficie</button>
+    <button id="save-manifest" type="button">Guardar manifest</button>
+    <button id="export-manifest" type="button">Exportar manifest</button>
+    <button id="save-draft" type="button">Guardar borrador local</button>
+  </header>
+  <main class="editor-grid">
+    <section class="editor-pane">
+      <h1>Superficie y árbol</h1>
+      <label>Superficie <select id="surface-select"></select></label>
+      <div class="editor-row">
+        <label>Tipo <select id="component-type"></select></label>
+        <button id="add-node" type="button">Añadir hijo</button>
+      </div>
+      <ol id="tree" class="tree"></ol>
+      <div class="editor-row">
+        <button id="move-up" type="button">Subir</button>
+        <button id="move-down" type="button">Bajar</button>
+        <button id="remove-node" type="button">Quitar</button>
+      </div>
+    </section>
+    <section class="editor-pane">
+      <h1>Inspector</h1>
+      <label>Layout <textarea id="node-layout" rows="8"></textarea></label>
+      <label>Props <textarea id="node-props" rows="8"></textarea></label>
+      <label>Actions <textarea id="node-actions" rows="5"></textarea></label>
+      <label>Capabilities <textarea id="node-capabilities" rows="5"></textarea></label>
+      <label>Columns <textarea id="node-columns" rows="7"></textarea></label>
+      <label>Options <textarea id="node-options" rows="7"></textarea></label>
+      <button id="apply-node" type="button">Aplicar nodo</button>
+      <h2>Perfiles de la superficie</h2>
+      <textarea id="surface-profiles" rows="4"></textarea>
+      <h2>Perfiles del framework</h2>
+      <textarea id="framework-profiles" rows="7"></textarea>
+      <button id="apply-profiles" type="button">Aplicar perfiles</button>
+      <h2>Contratos de superficie</h2>
+      <label>Data, state y payloads <textarea id="surface-contracts" rows="12"></textarea></label>
+      <label>Límite runtime <textarea id="surface-runtime" rows="12"></textarea></label>
+      <label>Assets fuente/runtime <textarea id="surface-assets" rows="8"></textarea></label>
+      <button id="apply-surface-contract" type="button">Aplicar contratos</button>
+      <h2>Tokens</h2>
+      <select id="token-select"></select>
+      <input id="token-value" type="text">
+      <button id="apply-token" type="button">Aplicar token</button>
+    </section>
+    <section class="editor-pane editor-preview-pane">
+      <h1>Preview estructural</h1>
+      <p>No certifica paridad HTML/Lua; representa el mismo árbol tipado.</p>
+      <div id="validation" role="status"></div>
+      <div id="preview" class="preview"></div>
+    </section>
+  </main>
+  <script src="../lib/sik-ui-model.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
