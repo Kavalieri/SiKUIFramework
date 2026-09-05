@@ -34,6 +34,16 @@ Metrics.table = Metrics.table or {
 }
 
 Metrics.safeMargin = Metrics.safeMargin or 16
+-- Shared grid breakpoint, matching the approved HTML viewport media query.
+Metrics.grid = Metrics.grid or { minimumTwoColumnWidth = 900, minimumTwoColumnHeight = 700 }
+
+function Metrics.gridColumns(viewport)
+	local width = tonumber(viewport and viewport.w) or 0
+	local height = tonumber(viewport and viewport.h) or 0
+	return width >= Metrics.grid.minimumTwoColumnWidth
+		and height >= Metrics.grid.minimumTwoColumnHeight and 2 or 1
+end
+
 Metrics.profiles = Metrics.profiles or {
 	compact = { minWidth = 0, contentGap = 6, rowHeight = 28 },
 	standard = { minWidth = 720, contentGap = 8, rowHeight = 32 },

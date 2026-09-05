@@ -2,12 +2,14 @@ require "SiK/UI/Namespace"
 require "SiK/UI/Window"
 require "SiK/UI/Block"
 require "SiK/UI/Scroll"
+require "SiK/UI/ScrollDock"
 require "SiK/UI/Controls"
 
 local Modal = SiK.UI.Modal or {}
 SiK.UI.Namespace.define("Modal", Modal)
 
-Modal.STANDARD_MODAL_W = 460
+Modal.WIDTH_MIN, Modal.WIDTH_STANDARD, Modal.WIDTH_MAX = 560, 720, 900
+Modal.STANDARD_MODAL_W = Modal.WIDTH_STANDARD
 local stacks = {}
 local ownerBindings = setmetatable({}, { __mode = "k" })
 local unbindOwner
@@ -151,10 +153,26 @@ end
 
 local function buildContentHost(panel, options)
 	local rect = panel:contentRect()
+	-- A dock owns scroll/fixed-action composition but not a second inset or
+	-- frame. Window.contentRect() has already applied Window.contentPadding.
+	if options.contentMode == "dock" then
+		local host = SiK.UI.Controls.panel(panel, { x = rect.x, y = rect.y,
+			w = rect.w, h = rect.h, controlId = "modalDockHost" })
+		if not host then return nil, "dock_host_unavailable" end
+		panel.contentBlock, panel.contentScroll, panel.contentHost = nil, nil, host
+		panel._sikModalContentMode = "dock"
+		return host, { x = 0, y = 0, w = rect.w, h = rect.h }
+	end
 	local contentHeight = math.max(0, tonumber(options.contentHeight) or rect.h)
 	local block, err = SiK.UI.Block.create({ parent = panel, x = rect.x, y = rect.y,
 		w = rect.w, h = rect.h, contentHeight = contentHeight })
 	if not block then return nil, err end
+	if options.scroll == false then
+		panel.contentBlock, panel.contentScroll = block, nil
+		panel.contentHost = block.panel
+		local contentRect = block:getContentRect()
+		return block.panel, contentRect
+	end
 	local scroll = SiK.UI.Scroll.create({ parent = block.panel,
 		viewportRect = block:getContentRect(), trackRect = block:getTrackRect(),
 		contentHeight = contentHeight, playerNum = panel.playerNum })
@@ -176,6 +194,23 @@ function Modal.apply(panel, options)
 	applied._sikModal = true
 	applied._sikModalKind = options.kind or "compact"
 	applied._sikModalOwner = options.owner
+	local host, contentRect = buildContentHost(applied, options)
+	if not host then
+		applied:dispose()
+		return nil, contentRect
+	end
+	applied.childParent = applied.contentHost
+	local originalReflow = applied.reflow
+	applied.reflow = function(self)
+		originalReflow(self)
+		local rect = self:contentRect()
+		if self._sikModalContentMode == "dock" then
+			SiK.UI.Layout.apply(self.contentHost, { x = rect.x, y = rect.y, w = rect.w, h = rect.h })
+		elseif self.contentBlock then
+			self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
+		end
+		return self
+	end
 	if not applied._sikModalDisposeWrapped then
 		applied._sikModalDisposeWrapped = true
 		local originalDispose = applied.dispose
@@ -183,6 +218,8 @@ function Modal.apply(panel, options)
 			if self._sikModalDisposed then return false end
 			self._sikModalDisposed = true
 			removeFromStack(self)
+			if self.contentBlock then self.contentBlock:dispose(); self.contentBlock = nil end
+			self.contentScroll, self.contentHost, self.childParent = nil, nil, nil
 			return originalDispose(self)
 		end
 	end
@@ -196,7 +233,9 @@ function Modal.create(options)
 	for key, value in pairs(options) do windowOptions[key] = value end
 	windowOptions.profile = windowOptions.profile or modalProfile(kind)
 	windowOptions.width = windowOptions.width or windowOptions.w
-		or (kind == "task" and 640 or Modal.STANDARD_MODAL_W)
+		or (kind == "task" and Modal.WIDTH_STANDARD or Modal.STANDARD_MODAL_W)
+	windowOptions.minWidth = windowOptions.minWidth or Modal.WIDTH_MIN
+	windowOptions.maxWidth = windowOptions.maxWidth or Modal.WIDTH_MAX
 	windowOptions.resizable = windowOptions.resizable == true
 	local panel = SiK.UI.Window.create(windowOptions)
 	panel._sikModal = true
@@ -214,7 +253,11 @@ function Modal.create(options)
 	panel.reflow = function(self)
 		originalReflow(self)
 		local rect = self:contentRect()
-		self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
+		if self._sikModalContentMode == "dock" then
+			SiK.UI.Layout.apply(self.contentHost, { x = rect.x, y = rect.y, w = rect.w, h = rect.h })
+		elseif self.contentBlock and self.contentBlock.setBounds then
+			self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
+		end
 		return self
 	end
 	local originalDispose = panel.dispose
@@ -296,91 +339,312 @@ local function translated(key, fallback)
 	return SiK.UI.resolveText(key, fallback)
 end
 
+-- Both simple dialog types use the same bounded composition as editors:
+-- intrinsic content above an intrinsic action block, with overflow confined
+-- to the content. The Window is the only owner of its outer 12px inset.
+local function dialogueDock(panel, host, rect)
+	local dock = SiK.UI.ScrollDock.create({ parent = host, x = 0, y = 0,
+		w = rect.w, h = rect.h, padding = 0, playerNum = panel.playerNum })
+	panel.dialogueDock = dock
+	return dock
+end
+
+local function finishDialogue(panel)
+	local baseReflow, baseDispose = panel.reflow, panel.dispose
+	panel.reflow = function(self)
+		baseReflow(self)
+		if self._sikDialogueReflow or not self.dialogueDock then return self end
+		self._sikDialogueReflow = true
+		local rect = self:contentRect()
+		local dock = self.dialogueDock
+		dock:reflow(0, 0, rect.w, rect.h)
+		-- Re-measure after overflow changes the usable width. Only the dock
+		-- reserves its scrollbar; neither the Block nor its controls do so.
+		for pass = 1, 3 do
+			local width = SiK.UI.Scroll.contentWidth(dock.scroll)
+			local bodyHeight, actionsHeight = self._sikDialogueLayout(width, rect.w)
+			dock:setFixedBottomHeight(actionsHeight)
+			dock:setContentHeight(bodyHeight)
+			self._sikDialogueHeight = bodyHeight + dock.gap + actionsHeight
+			if width == SiK.UI.Scroll.contentWidth(dock.scroll) then break end
+		end
+		self._sikDialogueReflow = nil
+		return self
+	end
+	panel.dispose = function(self)
+		if self.dialogueDock then
+			local body = self.questionBlock or self.inputBlock
+			if body then body:dispose() end
+			if self.actionsBlock then self.actionsBlock:dispose() end
+			self.dialogueDock:dispose()
+			self.dialogueDock, self.questionBlock, self.inputBlock, self.actionsBlock = nil, nil, nil, nil
+			self._sikDialogueLayout, self.inputField = nil, nil
+		end
+		return baseDispose(self)
+	end
+	panel:reflow()
+	Modal.fitContent(panel, panel._sikDialogueHeight, { center = true })
+	return panel
+end
+
 function Modal.confirm(options)
 	options = options or {}
 	local metrics = SiK.UI.Controls.metrics("compact")
-	local messageWidth = math.max(1, (options.width or Modal.STANDARD_MODAL_W) - 44)
-	local messageLines = SiK.UI.Controls.wrapText(options.message, messageWidth, UIFont.Small)
-	local messageHeight = #messageLines * (metrics.fontHeight + 3) + 16
-	local contentHeight = messageHeight + metrics.rowGap + metrics.buttonHeight
-	local panel
+	local width = options.width or Modal.STANDARD_MODAL_W
+	local messageWidth = math.max(1, width - 24)
+	local question = tostring(options.question or options.message or "")
+	local consequences = tostring(options.consequences or "")
+	local questionLines = SiK.UI.Controls.wrapText(question, messageWidth - 32, UIFont.Small)
+	local consequenceLines = consequences == "" and 0
+		or #SiK.UI.Controls.wrapText(consequences, messageWidth, UIFont.Small)
+	local questionHeight = math.max(24, #questionLines * (metrics.fontHeight + 3))
+		+ consequenceLines * (metrics.fontHeight + 3) + 16
+	if options.questionTitle or options.questionTooltip or options.questionInfo then
+		questionHeight = questionHeight + metrics.rowHeight + metrics.rowGap
+	end
+	local actionsHeight = metrics.buttonHeight + 16
+	if options.actionsTitle or options.actionsTooltip or options.actionsInfo then
+		actionsHeight = actionsHeight + metrics.rowHeight + metrics.rowGap
+	end
+	local contentHeight = questionHeight + metrics.rowGap + actionsHeight
+	local panel, rejectButton
+	local resolved = false
+	local function reject(reason)
+		if resolved then return end
+		resolved = true
+		if options.onReject then options.onReject(reason, panel) end
+		if options.onCancel then options.onCancel(reason, panel) end
+	end
+	local function accept()
+		if resolved then return end
+		resolved = true
+		if options.onAccept then options.onAccept(panel) end
+	end
 	panel = Modal.create({
 		kind = "confirm", title = options.title, playerNum = options.playerNum,
-		width = options.width or Modal.STANDARD_MODAL_W,
+		width = width,
 		height = options.height or (contentHeight + metrics.rowGap * 2 + 52),
 		contentHeight = options.contentHeight or contentHeight,
-		resizable = false, closeOnEscape = true, onClose = options.onClose,
-		buildContent = function(host, rect)
-			local message = SiK.UI.Controls.feedback(host, { x = rect.x, y = rect.y,
-				w = rect.w, text = options.message or "",
-				tone = options.tone or "info", playerNum = options.playerNum })
-			local y = message.y + message.height + metrics.rowGap
-			local width = math.floor((rect.w - metrics.controlGap) / 2)
-			SiK.UI.Controls.button(host, { x = rect.x, y = y, w = width,
-				text = options.cancelText or translated("UI_Cancel", "Cancel"), fullWidth = true,
+		contentMode = "dock", resizable = false, closeOnEscape = true,
+		onClose = function(context)
+			local reason = context and context.value or "close"
+			if reason ~= "accept" then reject(reason) end
+			if options.onClose then return options.onClose(context) end
+		end,
+		buildContent = function(host, rect, modalPanel)
+			local dock = dialogueDock(modalPanel, host, rect)
+			-- A confirmation consists of two framed semantic groups.  The alert is
+			-- the question marker itself; no second informational glyph is added.
+			local questionBlock = SiK.UI.Block.create({ parent = dock.contentHost, x = 0, y = 0,
+				w = rect.w, h = questionHeight, title = options.questionTitle,
+				tooltip = options.questionTooltip, info = options.questionInfo,
+				playerNum = options.playerNum })
+			modalPanel.questionBlock = questionBlock
+			local questionRect = questionBlock:getContentRect()
+			local y, header, copy
+			if type(options.alert) == "table" and (options.alert.icon or options.alert.texture) then
+				header = SiK.UI.Controls.alertRow(questionBlock.childParent, { x = questionRect.x,
+					y = questionRect.y, w = questionRect.w, icon = options.alert.icon or options.alert.texture,
+					severity = options.alert.severity, glow = options.alert.glow,
+					text = question, playerNum = options.playerNum, tooltip = options.alert.tooltip })
+			else
+				header = SiK.UI.Controls.copyText(questionBlock.childParent, { x = questionRect.x,
+					y = questionRect.y, w = questionRect.w,
+					text = question, tone = "text", playerNum = options.playerNum })
+			end
+			y = header.y + header.height + metrics.rowGap
+			if consequences ~= "" then
+				copy = SiK.UI.Controls.copyText(questionBlock.childParent, { x = questionRect.x,
+					y = y, w = questionRect.w,
+					text = consequences, tone = "textMuted", playerNum = options.playerNum })
+				y = copy.y + copy.height
+			end
+			questionBlock:setBounds(rect.x, rect.y, rect.w,
+				math.max(questionHeight, y - rect.y + 8))
+			local actionsY = rect.y + questionBlock.h + metrics.rowGap
+			local actionsBlock = SiK.UI.Block.create({ parent = dock.fixedBottomHost, x = 0, y = 0,
+				w = rect.w, h = actionsHeight, title = options.actionsTitle,
+				tooltip = options.actionsTooltip, info = options.actionsInfo,
+				playerNum = options.playerNum })
+				modalPanel.actionsBlock = actionsBlock
+			local actionsRect = actionsBlock:getContentRect()
+			local buttonWidth = math.floor((actionsRect.w - metrics.controlGap) / 2)
+			local rejectSpec, acceptSpec = options.reject or {}, options.accept or {}
+			rejectButton = SiK.UI.Controls.button(actionsBlock.childParent, { x = actionsRect.x,
+				y = actionsRect.y, w = buttonWidth,
+				text = rejectSpec.text or options.rejectText or "No", leadingIcon = rejectSpec.icon,
+				iconSize = rejectSpec.iconSize or 18, danger = rejectSpec.danger ~= false,
 				playerNum = options.playerNum, onClick = function()
-					Modal.close(panel, "cancel")
-					if options.onCancel then options.onCancel() end
+					reject("reject"); Modal.close(panel, "reject")
 				end })
-			SiK.UI.Controls.button(host, { x = rect.x + width + metrics.controlGap,
-				y = y, w = width, text = options.acceptText or translated("UI_Ok", "OK"),
-				fullWidth = true, playerNum = options.playerNum, onClick = function()
-					if options.onAccept then options.onAccept() end
-					Modal.close(panel, "accept")
-				end })
+				local acceptButton = SiK.UI.Controls.button(actionsBlock.childParent, { x = actionsRect.x + buttonWidth + metrics.controlGap,
+				y = actionsRect.y, w = buttonWidth, text = acceptSpec.text or options.acceptText or "Yes",
+				leadingIcon = acceptSpec.icon, iconSize = acceptSpec.iconSize or 18,
+				success = acceptSpec.success ~= false, playerNum = options.playerNum,
+					onClick = function() accept(); Modal.close(panel, "accept") end })
+			modalPanel._sikDialogueLayout = function(bodyWidth, actionWidth)
+				questionBlock:setBounds(0, 0, bodyWidth, questionBlock.h)
+				local column = questionBlock:beginColumn()
+				header:reflow(column.width)
+				column:block(header, header.height)
+				if copy then copy:reflow(column.width); column:block(copy, copy.height) end
+				local bodyHeight = column:finish()
+				actionsBlock:setBounds(0, 0, actionWidth, actionsBlock.h)
+				local actions = actionsBlock:beginColumn()
+				actions:row(metrics.buttonHeight, { { widget = rejectButton }, { widget = acceptButton } })
+				return bodyHeight, actions:finish()
+			end
 		end,
 	})
-	Modal.show(panel)
+	finishDialogue(panel)
+	Modal.show(panel, rejectButton)
 	return panel
 end
 
 function Modal.input(options)
-	options = options or {}
-	local metrics = SiK.UI.Controls.metrics("compact")
-	local field, panel
-	local function onWindowClose(context)
+        options = options or {}
+        local metrics = SiK.UI.Controls.metrics("compact")
+        local field, panel
+        local quantity = type(options.quantity) == "table" and options.quantity or nil
+        local function hasBlockHeader(title, tooltip, info)
+                return title ~= nil or tooltip ~= nil or info ~= nil
+        end
+        local function blockHeight(content, title, tooltip, info)
+                local height = content + 16
+                if hasBlockHeader(title, tooltip, info) then
+                        height = height + metrics.rowHeight + metrics.rowGap
+                end
+                return height
+        end
+        local fieldContentHeight = metrics.inputHeight
+        if quantity and quantity.max ~= nil then
+                fieldContentHeight = fieldContentHeight + metrics.rowGap + metrics.buttonHeight
+        end
+        local fieldBlockHeight = blockHeight(fieldContentHeight,
+                options.fieldTitle or options.inputTitle, options.fieldTooltip, options.fieldInfo)
+        local actionsBlockHeight = blockHeight(metrics.buttonHeight,
+                options.actionsTitle, options.actionsTooltip, options.actionsInfo)
+        local modalContentHeight = fieldBlockHeight + metrics.rowGap + actionsBlockHeight
+        local function setQuantity(delta)
+                if not field or not quantity then return false end
+                local minimum = tonumber(quantity.min) or 0
+                local maximum = tonumber(quantity.max)
+                local step = math.max(1, tonumber(quantity.step) or 1)
+                local current = tonumber(field:getText()) or minimum
+                current = math.floor(current + 0.0001) + delta * step
+                if current < minimum then current = minimum end
+                if maximum and current > maximum then current = maximum end
+                field:setText(tostring(current))
+                if field.onTextChange then field:onTextChange() end
+                return true
+        end
+        local function acceptValue()
+                local value = field and field:getText() or ""
+                if options.validate then
+                        local valid, replacement = options.validate(value, panel)
+                        if not valid then
+                                if options.onInvalid then options.onInvalid(replacement, value, panel) end
+                                return false, "invalid"
+                        end
+                        if replacement ~= nil then value = replacement end
+                end
+                local result = options.onAccept and options.onAccept(value, panel)
+                if result == false then return false, "rejected" end
+                Modal.close(panel, "accept")
+                return true, value
+        end
+        local function onWindowClose(context)
 		local reason = context and context.value or nil
 		if reason ~= "accept" and options.onCancel then
 			options.onCancel(context)
 		end
 		if options.onClose then return options.onClose(context) end
 	end
-	panel = Modal.create({
-		kind = "input", title = options.title, playerNum = options.playerNum,
-		width = options.width or Modal.STANDARD_MODAL_W,
-		height = options.height or 190, contentHeight = options.contentHeight or 100,
-		resizable = false, closeOnEscape = true, onClose = onWindowClose,
-		buildContent = function(host, rect)
-			field = SiK.UI.Controls.field(host, { x = rect.x, y = rect.y, w = rect.w,
-				text = options.text, placeholder = options.placeholder,
-				numeric = options.numeric, maxLength = options.maxLength,
-				playerNum = options.playerNum, onChange = options.onChange })
-			local buttonY = rect.y + metrics.inputHeight + metrics.rowGap
-			local buttonW = math.floor((rect.w - metrics.controlGap) / 2)
-			SiK.UI.Controls.button(host, { x = rect.x, y = buttonY, w = buttonW,
-				text = options.cancelText or translated("UI_Cancel", "Cancel"),
-				fullWidth = true, playerNum = options.playerNum,
-				onClick = function() Modal.close(panel, "cancel") end })
-			SiK.UI.Controls.button(host, { x = rect.x + buttonW + metrics.controlGap,
-				y = buttonY, w = buttonW,
-				text = options.acceptText or translated("UI_Ok", "OK"), fullWidth = true,
-				playerNum = options.playerNum, onClick = function()
-					local value = field:getText()
-					if options.validate then
-						local valid, replacement = options.validate(value, panel)
-						if valid == false then
-							if options.onInvalid then
-								options.onInvalid(replacement, value, panel)
-							end
-							return
-						end
-						if replacement ~= nil then value = replacement end
-					end
-					local result = options.onAccept and options.onAccept(value, panel)
-					if result ~= false then Modal.close(panel, "accept") end
-				end })
+        panel = Modal.create({
+                kind = "input", title = options.title, playerNum = options.playerNum,
+                width = options.width or Modal.STANDARD_MODAL_W,
+                height = options.height or (modalContentHeight + metrics.rowGap * 2 + 52),
+                contentHeight = options.contentHeight or modalContentHeight,
+                contentMode = "dock", resizable = false, closeOnEscape = true, onClose = onWindowClose,
+                buildContent = function(host, rect, modalPanel)
+                        local dock = dialogueDock(modalPanel, host, rect)
+                        local decreaseButton, increaseButton, maximumButton
+                        local fieldBlock = SiK.UI.Block.create({ parent = dock.contentHost, x = 0, y = 0,
+                                w = rect.w, h = fieldBlockHeight,
+                                title = options.fieldTitle or options.inputTitle,
+                                tooltip = options.fieldTooltip, info = options.fieldInfo,
+                                playerNum = options.playerNum })
+			modalPanel.inputBlock = fieldBlock
+                        local fieldRect = fieldBlock:getContentRect()
+                        local fieldWidth = fieldRect.w
+                        if quantity then
+                                fieldWidth = math.max(metrics.inputHeight,
+                                        fieldRect.w - metrics.inputHeight * 2 - metrics.controlGap * 2)
+                        end
+                        local fieldX = fieldRect.x
+                        if quantity then fieldX = fieldRect.x + metrics.inputHeight + metrics.controlGap end
+                        field = SiK.UI.Controls.field(fieldBlock.childParent, { x = fieldX, y = fieldRect.y, w = fieldWidth,
+                                text = options.text, placeholder = options.placeholder,
+                                numeric = options.numeric, maxLength = options.maxLength,
+                                playerNum = options.playerNum, onChange = options.onChange,
+                                onSubmit = function() return acceptValue() end })
+			modalPanel.inputField = field
+                        if quantity then
+                                decreaseButton = SiK.UI.Controls.button(fieldBlock.childParent, { x = fieldRect.x, y = fieldRect.y,
+                                        w = metrics.inputHeight, text = quantity.decrementText or "-",
+                                        tooltip = quantity.decrementTooltip,
+                                        playerNum = options.playerNum, onClick = function() setQuantity(-1) end })
+                                increaseButton = SiK.UI.Controls.button(fieldBlock.childParent, { x = fieldX + fieldWidth + metrics.controlGap,
+                                        y = fieldRect.y, w = metrics.inputHeight, text = quantity.incrementText or "+",
+                                        tooltip = quantity.incrementTooltip,
+                                        playerNum = options.playerNum, onClick = function() setQuantity(1) end })
+                                if quantity.max ~= nil then
+                                        maximumButton = SiK.UI.Controls.button(fieldBlock.childParent, { x = fieldRect.x,
+                                                y = fieldRect.y + metrics.inputHeight + metrics.rowGap, w = fieldRect.w,
+                                                text = quantity.maxText or tostring(quantity.max), fullWidth = true,
+                                                playerNum = options.playerNum, onClick = function()
+                                                        field:setText(tostring(quantity.max))
+                                                        if field.onTextChange then field:onTextChange() end
+                                                end })
+                                end
+                        end
+                        local actionsY = rect.y + fieldBlock.h + metrics.rowGap
+                        local actionsBlock = SiK.UI.Block.create({ parent = dock.fixedBottomHost, x = 0, y = 0,
+                                w = rect.w, h = actionsBlockHeight, title = options.actionsTitle,
+                                tooltip = options.actionsTooltip, info = options.actionsInfo,
+                                playerNum = options.playerNum })
+			modalPanel.actionsBlock = actionsBlock
+                        local actionsRect = actionsBlock:getContentRect()
+                        local buttonW = math.floor((actionsRect.w - metrics.controlGap) / 2)
+                        local cancelButton = SiK.UI.Controls.button(actionsBlock.childParent, { x = actionsRect.x, y = actionsRect.y, w = buttonW,
+                                text = options.cancelText or translated("UI_Cancel", "Cancel"),
+                                fullWidth = true, playerNum = options.playerNum,
+                                onClick = function() Modal.close(panel, "cancel") end })
+                        local acceptButton = SiK.UI.Controls.button(actionsBlock.childParent, { x = actionsRect.x + buttonW + metrics.controlGap,
+                                y = actionsRect.y, w = buttonW,
+                                text = options.acceptText or translated("UI_Ok", "OK"), fullWidth = true,
+                                active = options.acceptActive == true,
+                                playerNum = options.playerNum, onClick = acceptValue })
+			modalPanel._sikDialogueLayout = function(bodyWidth, actionWidth)
+				fieldBlock:setBounds(0, 0, bodyWidth, fieldBlock.h)
+				local column = fieldBlock:beginColumn()
+				if quantity then
+					column:row(metrics.inputHeight, {
+						{ widget = decreaseButton, w = metrics.inputHeight },
+						{ widget = field },
+						{ widget = increaseButton, w = metrics.inputHeight },
+					})
+				else column:block(field, metrics.inputHeight) end
+				if maximumButton then column:block(maximumButton, metrics.buttonHeight) end
+				local bodyHeight = column:finish()
+				actionsBlock:setBounds(0, 0, actionWidth, actionsBlock.h)
+				local actions = actionsBlock:beginColumn()
+				actions:row(metrics.buttonHeight, { { widget = cancelButton }, { widget = acceptButton } })
+				return bodyHeight, actions:finish()
+			end
 		end,
 	})
+	finishDialogue(panel)
 	Modal.show(panel, field)
 	return panel, field
 end

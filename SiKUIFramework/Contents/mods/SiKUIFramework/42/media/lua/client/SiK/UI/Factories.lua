@@ -455,6 +455,7 @@ local controlKinds = {
 	["section-title"] = "sectionTitle",
 	["alert-row"] = "alertRow",
 	["header-operation"] = "headerOperation",
+	["requirement-row"] = "requirementRow",
 }
 
 local function controlPresentation(props)
@@ -466,6 +467,8 @@ local function controlPresentation(props)
 		value = props.value, label = props.label, enabled = props.enabled,
 		status = props.status, mode = props.mode, severity = props.severity,
 		glow = props.glow, size = props.size,
+		icon = props.icon or props["icon-key"], state = props.state,
+		met = props.met, iconSize = props.iconSize or props["icon-size"],
 	}
 	if type(data) == "table" then
 		if data.text ~= nil then result.text = data.text end
@@ -482,6 +485,11 @@ local function controlPresentation(props)
 		if data.severity ~= nil then result.severity = data.severity end
 		if data.glow ~= nil then result.glow = data.glow end
 		if data.size ~= nil then result.size = data.size end
+		if data.icon ~= nil then result.icon = data.icon
+		elseif data.texture ~= nil then result.icon = data.texture end
+		if data.state ~= nil then result.state = data.state end
+		if data.met ~= nil then result.met = data.met end
+		if data.iconSize ~= nil then result.iconSize = data.iconSize end
 		if data.enabled ~= nil then result.enabled = data.enabled end
 		result.payload = data.payload or data
 	elseif data ~= nil then
@@ -508,8 +516,9 @@ local function controlFactory(parent, props, context)
         local fieldAction = kind == "iconButton" and props.variant == "field-action"
         return SiK.UI.Controls.create(kind, { parent = parent, x = props.bounds.x, y = props.bounds.y,
                 w = props.bounds.w, h = props.bounds.h, text = text, tooltip = tooltip,
-                payload = presentation.payload, icon = props.icon or props["icon-key"], enabled = presentation.enabled,
-                iconSize = props.iconSize or props["icon-size"],
+		payload = presentation.payload, icon = presentation.icon, state = presentation.state,
+		met = presentation.met, enabled = presentation.enabled,
+		iconSize = presentation.iconSize,
                 iconFit = props.iconFit or props["icon-fit"] or (fieldAction and "fill" or nil),
 				iconPadding = props.iconPadding or props["icon-padding"] or (fieldAction and 4 or nil),
                 items = presentation.items, selected = presentation.selected,

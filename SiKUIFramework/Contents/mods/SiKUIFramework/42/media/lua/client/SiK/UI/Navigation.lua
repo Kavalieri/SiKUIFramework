@@ -73,7 +73,8 @@ function Navigation.create(options)
 	local initialMetrics = SiK.UI.Metrics.profile(initialBounds.w, options.profile)
 	local initialDefaultExtent = (placement == "left" or placement == "right")
 		and math.max(initialMetrics.rowHeight,
-			number(options.sideExtent, initialMetrics.rowHeight * 2))
+			number(options.sideExtent, initialMetrics.window
+				and initialMetrics.window.railWidth or initialMetrics.rowHeight * 2))
 		or initialMetrics.rowHeight + SiK.UI.Metrics.spacing.xs
 	local initialExtent = math.max(1,
 		number(options.extent or options.barSize, initialDefaultExtent))
@@ -128,8 +129,8 @@ function Navigation.create(options)
 			if source.surfaceRef then self.surfaceHosts[source.surfaceRef] = host.panel end
 			self.items[index] = {
 				key = key, text = source.text or source.label or source.labelRef or "",
-				icon = source.icon, iconOnly = source.iconOnly,
-				tooltip = source.tooltip, badge = source.badge,
+				icon = source.icon, iconOnly = source.iconOnly, iconExact = source.iconExact,
+				tooltip = source.tooltip, badge = source.badge, alert = source.alert,
 				enabled = source.enabled ~= false and source.disabled ~= true,
 				payload = source.payload or source.value,
 				pin = source.pin, pinned = source.pinned,
@@ -166,6 +167,7 @@ function Navigation.create(options)
 		panel.parent = host.panel
 		SiK.UI.Layout.apply(panel, host:contentRect())
 		panel:setVisible(self.activeKey == key)
+		host.mountedContent = panel
 		self.mountedContents[key] = panel
 		if self.activeKey == key and SiK.UI.Diagnostics and SiK.UI.Diagnostics.enabled() then
 			SiK.UI.Diagnostics.inspectMount(self, key)
@@ -217,8 +219,14 @@ function Navigation.create(options)
 	function instance:getContentBounds(fallback)
 		local outer = SiK.UI.Layout.resolveRect(self.contentBounds,
 			fallback or self.bounds or options.bounds, 1)
-		local inner = self.contentHost and self.contentHost:contentRect()
-			or { x = 0, y = 0, w = outer.w, h = outer.h }
+		local inner = { x = 0, y = 0, w = outer.w, h = outer.h }
+		if self.contentHost then
+			local hostOptions = self.contentHost.options or {}
+			local padding = SiK.UI.Layout.insets(hostOptions.padding,
+				hostOptions.defaultPadding or 0)
+			inner = SiK.UI.Layout.inset(inner, padding.left, padding.top,
+				padding.right, padding.bottom)
+		end
 		return { x = outer.x + inner.x, y = outer.y + inner.y,
 			w = inner.w, h = inner.h }
 	end
@@ -229,7 +237,8 @@ function Navigation.create(options)
 			self.bounds or { x = 0, y = 0, w = 1, h = 1 }, 1)
 		local metrics = SiK.UI.Metrics.profile(bounds.w, options.profile)
 		local defaultExtent = (placement == "left" or placement == "right")
-			and math.max(metrics.rowHeight, number(options.sideExtent, metrics.rowHeight * 2))
+			and math.max(metrics.rowHeight, number(options.sideExtent,
+				metrics.window and metrics.window.railWidth or metrics.rowHeight * 2))
 			or metrics.rowHeight + SiK.UI.Metrics.spacing.xs
 		local extent = math.max(1, number(options.extent or options.barSize, defaultExtent))
 		local gap = math.max(0, number(options.contentGap, 0))
@@ -271,14 +280,22 @@ function Navigation.create(options)
 		placement = placement, items = instance.items, activeKey = options.activeKey,
 		playerNum = options.playerNum, profile = options.profile, theme = options.theme,
 		gap = options.itemGap or options.gap, padding = options.barPadding,
+		leadingInset = options.railInsetTop, trailingInset = options.railInsetBottom,
+		crossInset = options.railCrossInset,
 		itemExtent = options.itemExtent, iconSize = options.iconSize,
 		iconFit = options.iconFit or "contain", iconPadding = options.iconPadding,
-		iconOnly = options.iconOnly, tooltipMode = options.tooltipMode,
-		tooltipSide = options.tooltipSide, tooltipGap = options.tooltipGap,
+		iconOnly = options.iconOnly,
+		tooltipMode = options.railTooltip == true and "flyout" or options.tooltipMode,
+		tooltipSide = options.railTooltip == true
+			and (placement == "left" and "before" or "after") or options.tooltipSide,
+		tooltipGap = options.tooltipGap,
+		tooltipProfile = options.railTooltip == true and "rail" or options.tooltipProfile,
 		tooltipBackgroundColor = options.tooltipBackgroundColor,
 		tooltipBorderColor = options.tooltipBorderColor,
 		tooltipTextColor = options.tooltipTextColor,
-		selectionStyle = options.selectionStyle, separator = options.separator,
+		selectionStyle = options.selectionStyle
+			or ((placement == "left" or placement == "right") and "border" or nil),
+		separator = options.separator,
 		separatorOffset = options.separatorOffset,
 		backgroundColor = options.backgroundColor,
 		selectedBackgroundColor = options.selectedBackgroundColor,
@@ -297,7 +314,8 @@ function Navigation.create(options)
 		end })
 	if not instance.tabs then instance:dispose(); return nil, err end
 	instance.barVisible = options.barVisible ~= false
-	instance:setActive(options.activeKey or (instance.items[1] and instance.items[1].key), false)
+	instance:setActive(options.activeKey or options.defaultKey
+		or (instance.items[1] and instance.items[1].key), false)
 	instance:reflow(options.bounds)
 	return instance
 end

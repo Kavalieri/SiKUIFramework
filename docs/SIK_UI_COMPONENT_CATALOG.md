@@ -130,6 +130,20 @@ Products select the variant and provide data only.
 
 ## Common compositional geometry contract
 
+`ScrollDock.create(options)` owns one scrollable `contentHost` and one sibling
+`fixedBottomHost`. Its default outer padding is 12 px and the sibling gap is
+8 px. `fixedBottomHeight` or `measureFixedBottom(host, dock)` determines the
+intrinsic lower region; `setContentHeight`, `setFixedBottomHeight` and
+`reflow(bounds)` recalculate both rectangles without overlay. The Dock is the
+only scrollbar owner and exposes `getContentRect`, `getFixedBottomRect`,
+`getScrollOffset`, `setScrollOffset` and idempotent `dispose`.
+
+`Block.intrinsicHeight(contentHeight, options)` measures an ordinary framed
+section. `fill=true` is the explicit functional viewport request. `Table`
+accepts `allRowsVisible=true` or `heightMode="content"`; its
+`getIntrinsicHeight()` gives an outer ScrollDock the full projected-row height
+without a second table scrollbar.
+
 Every public compositional handle that owns a rectangle exposes
 `handle:reflow(bounds)`. `bounds` is declarative (`x`, `y`, and either `w`/`h`
 or `width`/`height`). Component-specific setters such as `Block:setBounds` and

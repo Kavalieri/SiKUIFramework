@@ -52,7 +52,7 @@ remain product-owned.
 |---|---|
 | Namespace/runtime | `Namespace`, `Version`, `Surface`, `Builder`, `Factories`, `Capabilities`, `Bindings` |
 | Geometry/style | `Viewport`, `Metrics`, `Layout`, `Theme`, `Icon` |
-| Composition/content | `Container`, `Block`, `Collection`, `Card`, `CardCollection`, `ActionGroup`, `Scroll`, `VirtualList`, `Table`, `Form` |
+| Composition/content | `Container`, `Block`, `Collection`, `Card`, `CardCollection`, `ActionGroup`, `Scroll`, `ScrollDock`, `VirtualList`, `Table`, `Form` |
 | Surface host | `Window`, `Modal` |
 | Interaction | `Controls`, `Tooltip`, `Feedback`, `Popover`, `Menu`, `Drag`, `DragGhost`, `DropTarget`, `WorldPicker`, `FocusStack`, `Lifecycle`, `State` |
 
@@ -100,6 +100,42 @@ in another. See the runtime reference for the complete matrix and fallback
 behavior.
 
 ## Error and lifecycle convention
+
+### Editable-field submission
+
+`UI.Controls.field(parent, { onSubmit = callback })` invokes the optional
+callback only for that field's Enter submission, using the standard context
+envelope (`value` is the current text). Disabled fields do not submit. The
+consumer validates and stores the value; this does not imply a window-wide
+default action, row activation, disclosure or confirmation.
+
+`UI.Modal.input` shares its validation/acceptance path between the explicit
+accept control and field submission. Invalid input stays open; an `onAccept`
+result of `false` also keeps it open. `UI.Modal.confirm` does not inherit this
+editable-field submission behaviour.
+
+Both dialog constructors measure their body Blocks at the available width.
+They use `ScrollDock` inside the modal content rectangle: the question or
+input Block scrolls only when needed; the intrinsic Actions Block stays in
+the fixed bottom host. The dock adds no second outer padding and owns the
+single inter-block gap. Resizing remeasures wrapped text and the overflow
+gutter; disposal releases both Blocks and the dock. A quantity input only
+allocates its maximum control when a maximum exists. Its minus/plus controls
+edit the field without submitting it; validation must return a truthy result
+before acceptance proceeds.
+
+`UI.Controls.effectiveSearchQuery(text, options)` returns `query, active`, with
+`query=nil` below the same character threshold used by `Controls.search`
+(default three regular characters or two wide characters). It performs no
+filtering, scheduling or mutation; consumers retain their raw query separately
+so clearing, resizing and changing filters do not lose the entered value.
+
+`UI.Controls.dismissibleRow(parent, options)` constructs one atomic bordered
+row with truncated left text and a `sik.close.18` removal control.  Options are
+`text`, `tone`, `theme`, `tooltip`, `actionTooltip`, `onRemove`, `playerNum`,
+`w`, `h` and `profile`; padding and gap default to 8.  The returned row owns
+its close child and exposes `reflow(width)` plus idempotent `dispose()`.
+`UI.Controls.dismissibleRowHeight(options)` returns its standard allocation.
 
 Constructors return `instance` on success, or `nil, reason` for invalid inputs
 or unsupported setup. Mutators return their instance/value on success, or
@@ -154,3 +190,21 @@ Neither is a wrapper that only renames one vanilla call.
 
 `tab-options` is the only documented ID for that product surface. This
 framework does not define aliases for it.
+# Requirements
+
+`SiK.UI.Requirements.create({parent, x, y, w, groups, profile, playerNum})`
+returns `{panel, height, reflow(width), dispose()}`. Each ordered group has
+`rows={{text, texture, state, tone}, ...}`. `state` uses the shared
+`Controls.requirementRow` contract (`met`/`missing`). Product owns labels,
+textures and classification; the framework owns all geometry.
+
+Exactly two nonempty groups with at least four rows receive two untitled
+Blocks. `Metrics.gridColumns(Viewport.resolve(playerNum))` stacks them below
+900 viewport pixels wide or 700 high, matching the approved HTML media query.
+Otherwise they sit side by side. `environment` optionally supplies the neutral
+Viewport test adapter; consumers do not override margins or breakpoints.
+Other group counts render one continuous list without dropping rows. Padding
+and gap come from Block/Metrics. Height follows wrapped rows; no fill.
+`reflow` replaces owned controls and updates `height`; callers position the
+panel through their Block column and repeat enclosing layout after reflow.
+Disposing the panel also disposes its handle, idempotently.

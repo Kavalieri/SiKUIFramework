@@ -159,6 +159,13 @@ constructors. `Modal.input` accepts optional accept/cancel callbacks;
 `resolveContentRect`, `resolveScrollBarRect` and `bindScrollable` expose the
 same geometry calculation without constructing a Block.
 
+`Block.resolveViewportRect(bounds, overflow, { metrics = ... })` returns
+detached content and optional track rectangles for an already-inset descendant
+viewport. It adds no padding, preserves the supplied origin, and reserves the
+canonical scrollbar width plus gap only at the right when overflow is true.
+Consumers of an already narrowed Block rectangle pass false: never reserve
+the same scrollbar twice. Table delegates its intermediate viewport here.
+
 `Scroll.create` accepts `{ parent, viewportRect, trackRect, contentHeight,
 wheelStep, playerNum }`. It exposes `scrollBy`, `setScrollOffset`,
 `getScrollOffset`, `captureState`, `restoreState`, `addChild`, `removeChild`,
@@ -292,7 +299,7 @@ factory. Supported kinds are `button`, `iconButton`, `icon`, `field`, `combo`,
 `search`, `toggle`, `status`, `feedback`, `panel`, `separator`, `progress`,
 `copyText`, `sectionTitle`, `blockHeader`, `listOption`, `requirementRow` and
 Card's `summary` variant. The catalog's
-hyphenated IDs (`icon-button`, `section-title`) are normalized by Factories,
+hyphenated IDs (`icon-button`, `section-title`, `requirement-row`) are normalized by Factories,
 not by direct `Controls.create`. Direct code may pass either
 `Controls.create(kind, options)` (with `options.parent`) or
 `Controls.create(kind, parent, options)`.

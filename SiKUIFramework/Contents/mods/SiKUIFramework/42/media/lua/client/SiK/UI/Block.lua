@@ -73,6 +73,38 @@ function Block.resolveScrollBarRect(bounds, options)
 	}
 end
 
+--- Pure trailing scrollbar geometry for descendants that own a viewport but
+--- not the Block's outer padding.  `bounds` is already the parent content rect.
+function Block.resolveViewportRect(bounds, overflow, options)
+	bounds, options = bounds or {}, options or {}
+	local tokens = SiK.UI.Metrics.tokens(options.metrics)
+	local w, h = math.max(0, numberOr(bounds.w, 0)), math.max(0, numberOr(bounds.h, 0))
+	local x, y = numberOr(bounds.x, 0), numberOr(bounds.y, 0)
+	local bar = math.max(0, numberOr(tokens.block.scrollBarWidth, 14))
+	local gap = math.max(0, numberOr(tokens.block.scrollGap, 10))
+	local gutter = overflow == true and bar + gap or 0
+	return { x = x, y = y, w = math.max(0, w - gutter), h = h },
+		overflow == true and { x = x + math.max(0, w - bar), y = y, w = bar, h = h } or nil
+end
+
+--- Returns the natural framed height for content that does not request a
+--- functional viewport. `fill` is deliberately opt-in; callers use this
+--- value to stack ordinary Blocks without turning spare surface space into a
+--- misleading framed region.
+function Block.intrinsicHeight(contentHeight, options)
+	options = options or {}
+	local tokens = SiK.UI.Metrics.tokens(options.metrics)
+	local paddingY = math.max(0, numberOr(options.paddingY, tokens.block.padding))
+	local headerHeight = math.max(0, numberOr(options.headerHeight, 0))
+	local headerGap = headerHeight > 0 and math.max(0,
+		numberOr(options.headerGap, tokens.spacing.sm)) or 0
+	local footerHeight = math.max(0, numberOr(options.footerHeight, 0))
+	local footerGap = footerHeight > 0 and math.max(0,
+		numberOr(options.footerGap, tokens.spacing.sm)) or 0
+	return paddingY * 2 + headerHeight + headerGap + footerHeight + footerGap
+		+ math.max(0, numberOr(contentHeight, 0))
+end
+
 function Block.resolveLayout(bounds, options)
 	bounds = bounds or {}
 	options = options or {}
@@ -87,8 +119,7 @@ function Block.resolveLayout(bounds, options)
 		- headerGap - footerHeight - footerGap)
 	local regionHeight = available
 	if options.fill ~= true and options.contentHeight ~= nil then
-		local desired = math.max(0, numberOr(options.contentHeight, 0))
-			+ tokens.block.padding * 2
+		local desired = Block.intrinsicHeight(options.contentHeight, options)
 		regionHeight = math.min(available, math.max(
 			math.max(0, numberOr(options.minContentHeight, 0)), desired))
 	end
@@ -126,6 +157,22 @@ function Block.bindScrollable(widget, options)
 		or previous.w ~= rect.w or previous.h ~= rect.h
 		or previous.overflow ~= rect.overflow
 	return rect, changed
+end
+
+--- Resolves the actual Block content host for a descendant panel. This is a
+--- geometry boundary: terminal widgets bind to the Block that owns padding
+--- and scrollbar reservation instead of recreating either reservation.
+function Block.contentOwner(parent)
+	local current, depth = parent, 0
+	while type(current) == "table" and depth < 64 do
+		local owner = current._sikUiBlock
+		if type(owner) == "table" and type(owner.getContentRect) == "function" then
+			return owner, current
+		end
+		current = current.parent
+		depth = depth + 1
+	end
+	return nil, nil
 end
 
 function BlockInstance:_notify(reason, previous)
@@ -171,6 +218,34 @@ end
 
 function BlockInstance:getTrackRect()
 	return copyRect(self.trackRect)
+end
+
+--- Compose intrinsic content in the canonical Block rectangle. Widgets are
+--- adopted by the Block, never painted as siblings behind its frame.
+function BlockInstance:beginColumn()
+	local owner = self
+	local rect = self:getContentRect()
+	local tokens = SiK.UI.Metrics.tokens(self.metrics)
+	local column = SiK.UI.Layout.column({ x = rect.x, y = rect.y, w = rect.w,
+		gap = tokens.spacing.sm, position = function(widget, x, y, w, h)
+			local panel = widget.panel or widget
+			if panel.parent ~= owner.childParent then
+				if panel.parent and panel.parent.removeChild then panel.parent:removeChild(panel) end
+				owner.childParent:addChild(panel)
+			end
+			local block = panel._sikUiBlock
+			if block then block:setBounds(x, y, w, h)
+			else SiK.UI.Layout.apply(panel, { x = x, y = y,
+				w = w or panel.width, h = h or panel.height }) end
+		end })
+	column.parent = self.childParent
+	function column:finish()
+		local trailingGap = self.cursor > self.startY and self.gap or 0
+		local height = self.cursor - trailingGap + owner.headerY
+		owner:setBounds(owner.x, owner.y, owner.w, height)
+		return height
+	end
+	return column
 end
 
 function BlockInstance:setBounds(x, y, w, h)
@@ -287,6 +362,7 @@ function Block.create(options)
 	local container, err = SiK.UI.Container.create({ parent = options.parent,
 		x = x, y = y, w = w, h = h, padding = 0,
 		background = background, border = border,
+		accent = options.accent,
 		playerNum = options.playerNum, controlId = "block" })
 	if not container then return nil, err end
 	local panel = container.panel

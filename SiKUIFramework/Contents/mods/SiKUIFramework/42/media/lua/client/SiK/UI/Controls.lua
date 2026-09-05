@@ -304,7 +304,8 @@ end
 local function applyButtonTheme(button, options)
 	local theme = SiK.UI.Theme.tokens(options.theme)
 	local background = options.danger and theme.danger
-		or (options.active and theme.selected or theme.surfaceAlt)
+		or (options.success and theme.success
+			or (options.active and theme.selected or theme.surfaceAlt))
 	-- ISButton renders textColor unconditionally whenever it is enabled.  Own
 	-- each table so no consumer can leave a shared vanilla control with nil
 	-- colour fields or mutate a theme token.
@@ -489,11 +490,23 @@ function Controls.button(parent, options)
 		self:drawRectBorder(0, 0, self.width, self.height, border.a, border.r, border.g, border.b)
 	end
 	button.render = function(self)
-		if self.title == "" then return end
+		if self.title == "" and not options.leadingIcon then return end
 		local color = self.enable ~= false and self.textColor
 			or SiK.UI.Theme.tokens(options.theme).textMuted
-		local x, y = Controls.textPosition({ x = 0, y = 0, w = self.width, h = self.height },
-			self.title, { font = options.font or UIFont.Small, align = "center", verticalAlign = "middle" })
+		local iconSize = options.leadingIcon and math.max(1, n(options.iconSize, 18)) or 0
+		local gap = iconSize > 0 and math.max(0, n(options.iconGap, 6)) or 0
+		local labelWidth = measuredWidth(type(getTextManager) == "function" and getTextManager() or nil,
+			options.font or UIFont.Small, self.title)
+		local contentWidth = labelWidth + iconSize + gap
+		local origin = math.floor((self.width - contentWidth) / 2)
+		if options.leadingIcon then
+			local iconY = math.floor((self.height - iconSize) / 2)
+			local drawn = SiK.UI.Icon.drawExact(self, options.leadingIcon, origin, iconY, iconSize, iconSize)
+			if not drawn then SiK.UI.Icon.draw(self, options.leadingIcon, origin, iconY, iconSize, iconSize) end
+		end
+		local _, y = Controls.textPosition({ x = 0, y = 0, w = self.width, h = self.height },
+			self.title, { font = options.font or UIFont.Small, align = "left", verticalAlign = "middle" })
+		local x = origin + iconSize + gap
 		self:drawText(self.title, x, y, color.r, color.g, color.b, color.a,
 			options.font or UIFont.Small)
 	end
@@ -706,6 +719,7 @@ function Controls.field(parent, options)
 		callback(self, options, "onChange", self.getText and self:getText() or self.text)
 	end
 	entry.onPressEnter = function(self)
+		if options.enabled == false then return false end
 		return callback(self, options, "onSubmit", self.getText and self:getText() or self.text)
 	end
 	decorate(entry, "field", options)
@@ -765,6 +779,22 @@ local function searchThreshold(options, wide)
 	return wide and wideValue or regular
 end
 
+--- Returns a query only when it has reached the framework search threshold.
+--- The optional thresholds remain declarative: regular text defaults to three
+--- characters and wide UTF-8 text to two. Consumers use the raw text when
+--- clearing a previous result, and this helper for filtering decisions.
+---@param text any
+---@param options table|nil
+---@return string|nil query
+---@return boolean active
+function Controls.effectiveSearchQuery(text, options)
+	options = type(options) == "table" and options or {}
+	local value = tostring(text or "")
+	local count, wide = searchTextInfo(value)
+	local active = value ~= "" and count >= searchThreshold(options, wide)
+	return active and value or nil, active
+end
+
 function Controls.search(parent, options)
 	parent, options = controlArgs(parent, options)
 	local metrics = Controls.metrics(options.profile)
@@ -787,8 +817,7 @@ function Controls.search(parent, options)
 
 	local function emitChange(self)
 		local text = self.entry and self.entry:getText() or ""
-		local count, wide = searchTextInfo(text)
-		local active = text ~= "" and count >= searchThreshold(options, wide)
+		local _, active = Controls.effectiveSearchQuery(text, options)
 		if active then
 			self._sikSearchLastEffective = true
 			callback(self, options, "onChange", text)
@@ -810,9 +839,8 @@ function Controls.search(parent, options)
 	local function submit(self)
 		cancelPending(self)
 		local text = self.entry and self.entry:getText() or ""
-		local count, wide = searchTextInfo(text)
-		self._sikSearchLastEffective = text ~= ""
-			and count >= searchThreshold(options, wide)
+		local _, active = Controls.effectiveSearchQuery(text, options)
+		self._sikSearchLastEffective = active
 		return callback(self, options, "onSubmit", text)
 	end
 
@@ -1208,19 +1236,31 @@ end
 --- Neutral icon-plus-message row. Product code supplies the message and asset;
 --- this component only guarantees the 1:1 symbol slot and centred text baseline.
 function Controls.alertRow(parent, options)
-	parent, options = controlArgs(parent, options)
-	local size = math.max(1, n(options.size, 24))
-	local gap = math.max(0, n(options.gap, 8))
-	local panel = Controls.panel(nil, { x = options.x, y = options.y,
-		w = options.w or options.width or 240, h = options.h or options.height or size,
-		playerNum = options.playerNum, controlId = "alertRow" })
+        parent, options = controlArgs(parent, options)
+        local size = math.max(1, n(options.size, 24))
+        local gap = math.max(0, n(options.gap, 8))
+        local font = options.font or UIFont.Small
+        local lineGap = math.max(0, n(options.lineGap, 2))
+        local panel = Controls.panel(nil, { x = options.x, y = options.y,
+                w = options.w or options.width or 240, h = options.h or options.height or size,
+		playerNum = options.playerNum, controlId = "alertRow", tooltip = options.tooltip })
 	panel.icon, panel.text, panel.severity = options.icon or options.texture,
 		tostring(options.text or ""), options.severity or "warning"
-	panel.glow = options.glow == true
-	panel.tone = options.tone or "text"
-	panel.prerender = function(self)
-		local color = SiK.UI.Theme.color(self.severity == "danger" and "danger" or "warning", options.theme)
-		local y = math.floor((self.height - size) / 2)
+        panel.glow = options.glow == true
+        panel.tone = options.tone or "text"
+        panel.lines = {}
+        local function reflow(self, width)
+                if width ~= nil then self:setWidth(math.max(1, n(width, self.width))) end
+                local textWidth = math.max(1, self.width - size - gap)
+                self.lines = Controls.wrapText(self.text, textWidth, font)
+                local textHeight = #self.lines * fontHeight(font)
+                        + math.max(0, #self.lines - 1) * lineGap
+                self:setHeight(math.max(size, textHeight))
+                return self
+        end
+        panel.prerender = function(self)
+                local color = SiK.UI.Theme.color(self.severity == "danger" and "danger" or "warning", options.theme)
+                local y = math.floor((self.height - size) / 2)
 		if self.icon then
 			if self.glow == true then Icon.draw(self, self.icon, 0, y, size, size,
 				{ alpha = 0.28, r = color.r, g = color.g, b = color.b }) end
@@ -1228,21 +1268,87 @@ function Controls.alertRow(parent, options)
 			-- packaging error; never hide it with a blurred runtime rescale.
 			Icon.drawExact(self, self.icon, 0, y, size, size)
 		end
-		local font = options.font or UIFont.Small
-		local textY = math.floor((self.height - fontHeight(font)) / 2)
-		local textColor = SiK.UI.Theme.color(self.tone, options.theme)
-		self:drawText(self.text, size + gap, textY, textColor.r, textColor.g, textColor.b, textColor.a, font)
-	end
+                local textColor = SiK.UI.Theme.color(self.tone, options.theme)
+                local textHeight = #self.lines * fontHeight(font)
+                        + math.max(0, #self.lines - 1) * lineGap
+                local textY = math.floor((self.height - textHeight) / 2)
+                for index = 1, #self.lines do
+                        self:drawText(self.lines[index], size + gap, textY,
+                                textColor.r, textColor.g, textColor.b, textColor.a, font)
+                        textY = textY + fontHeight(font) + lineGap
+                end
+        end
 	function panel:setAlert(spec)
 		spec = type(spec) == "table" and spec or { text = spec }
 		if spec.text ~= nil then self.text = tostring(spec.text) end
 		if spec.icon ~= nil then self.icon = spec.icon end
-		if spec.severity ~= nil then self.severity = spec.severity end
-		if spec.glow ~= nil then self.glow = spec.glow == true end
-		if spec.tone ~= nil then self.tone = spec.tone end
+                if spec.severity ~= nil then self.severity = spec.severity end
+                if spec.glow ~= nil then self.glow = spec.glow == true end
+                if spec.tone ~= nil then self.tone = spec.tone end
+                return reflow(self)
+        end
+        panel.reflow = function(self, width) return reflow(self, width) end
+        reflow(panel)
+        return attach(parent, panel)
+end
+
+--- Compact removable row used by rule chips and other atomic selections.
+--- The row owns its close control; callers only provide the semantic removal.
+function Controls.dismissibleRow(parent, options)
+	parent, options = controlArgs(parent, options)
+	local metrics = Controls.metrics(options.profile)
+	local pad, gap = math.max(0, n(options.padding, 8)), math.max(0, n(options.gap, 8))
+	local closeSize = math.max(1, n(options.closeSize, metrics.buttonHeight))
+	local height = math.max(closeSize + pad * 2, n(options.h or options.height, metrics.buttonHeight + pad * 2))
+	local tooltip = options.tooltip or tostring(options.text or "")
+	local panel = Controls.panel(nil, { x = options.x, y = options.y,
+		w = math.max(1, n(options.w or options.width, 240)), h = height,
+		playerNum = options.playerNum, controlId = "dismissibleRow", tooltip = tooltip })
+	panel.text = tostring(options.text or "")
+	panel.tone, panel.padding, panel.gap, panel.closeSize = options.tone or "text", pad, gap, closeSize
+	panel.prerender = function(self)
+		local theme = SiK.UI.Theme.tokens(options.theme)
+		self:drawRect(0, 0, self.width, self.height, theme.surfaceAlt.a, theme.surfaceAlt.r, theme.surfaceAlt.g, theme.surfaceAlt.b)
+		self:drawRectBorder(0, 0, self.width, self.height, theme.border.a, theme.border.r, theme.border.g, theme.border.b)
+		local closeW = math.min(self.closeSize, math.max(0, self.width - self.padding))
+		local available = math.max(0, self.width - self.padding * 2 - closeW - self.gap)
+		if available < 1 then return end
+		local text = Controls.truncateText(self.text, available, options.font or UIFont.Small)
+		local color = SiK.UI.Theme.color(self.tone, options.theme)
+		local _, y = Controls.textPosition({ x = self.padding, y = 0, w = available, h = self.height }, text,
+			{ font = options.font or UIFont.Small, align = "left", verticalAlign = "middle" })
+		self:drawText(text, self.padding, y, color.r, color.g, color.b, color.a, options.font or UIFont.Small)
+	end
+	panel.close = Controls.button(nil, { x = 0, y = 0, w = closeSize, h = closeSize, text = "",
+		leadingIcon = "sik.close.18", iconSize = 18, fullWidth = true, playerNum = options.playerNum,
+		tooltip = options.actionTooltip or tooltip, onClick = function() return callback(panel, options, "onRemove") end })
+	panel:addChild(panel.close)
+	function panel:reflow(width)
+		if width then self:setWidth(math.max(1, n(width, self.width))) end
+		local closeW = math.min(self.closeSize, math.max(0, self.width - self.padding))
+		self.close:setWidth(closeW)
+		self.close:setX(math.max(0, self.width - self.padding - closeW))
+		self.close:setY(math.floor((self.height - self.closeSize) / 2))
 		return self
 	end
+	local previousDispose = panel.dispose
+	function panel:dispose()
+		if self._sikDismissibleDisposed then return false end
+		self._sikDismissibleDisposed = true
+		if self.close then self:removeChild(self.close); if self.close.dispose then self.close:dispose() end; self.close = nil end
+		if type(previousDispose) == "function" then previousDispose(self) end
+		return true
+	end
+	panel:reflow()
 	return attach(parent, panel)
+end
+
+function Controls.dismissibleRowHeight(options)
+	options = options or {}
+	local metrics = Controls.metrics(options.profile)
+	local pad = math.max(0, n(options.padding, 8))
+	local closeSize = math.max(1, n(options.closeSize, metrics.buttonHeight))
+	return math.max(closeSize + pad * 2, n(options.h or options.height, metrics.buttonHeight + pad * 2))
 end
 
 function Controls.headerOperation(parent, options)

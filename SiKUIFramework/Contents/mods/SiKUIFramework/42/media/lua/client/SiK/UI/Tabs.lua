@@ -124,7 +124,8 @@ local function decorateTabButton(button, item, placement, options)
 		local selected = self._sikSelected == true
 		local scale = (item.iconExact == true or options.iconExact == true) and 1
 			or (hovered and number(options.hoverIconScale, 1.08) or 1)
-		local padding = math.max(0, number(options.iconPadding, 4))
+	local padding = math.max(0, number(options.iconPadding,
+		(placement == "left" or placement == "right") and 0 or 4))
 		local availableW, availableH = math.max(1, self.width - padding * 2),
 			math.max(1, self.height - padding * 2)
 		local iconSize = options.iconFit == "fill"
@@ -352,6 +353,14 @@ function Tabs.create(options)
 			and number(profile.window and profile.window.railGap, 0) or 0
 		local gap = math.max(0, number(options.gap or options.itemGap, defaultGap))
 		local padding = math.max(0, number(options.padding, 0))
+		-- A rail is a contained strip: top and bottom breathing room are not
+		-- horizontal shrinkage. Explicit values keep its icon slots fixed.
+		local leadingInset = math.max(0, number(options.leadingInset or options.paddingTop,
+			self.orientation == "side" and 12 or padding))
+		local trailingInset = math.max(0, number(options.trailingInset or options.paddingBottom,
+			self.orientation == "side" and 12 or padding))
+		local crossInset = math.max(0, number(options.crossInset,
+			self.orientation == "side" and 12 or padding))
 		local horizontal = self.orientation ~= "side"
 		local mainStart, mainEnd = {}, {}
 		for index = 1, #self.items do
@@ -359,20 +368,19 @@ function Tabs.create(options)
 			if isPinned(self.items[index]) then mainEnd[#mainEnd + 1] = button
 			else mainStart[#mainStart + 1] = button end
 		end
-		local available = (horizontal and bounds.w or bounds.h) - padding * 2
+		local available = (horizontal and bounds.w or bounds.h) - leadingInset - trailingInset
 		local extent = number(options.itemExtent or options.itemWidth or options.itemHeight, nil)
 		if extent == nil then
-			extent = math.floor((available - gap * math.max(0, count - 1)) / count)
+			extent = self.orientation == "side"
+				and number(profile.window and profile.window.railItemHeight, profile.rowHeight)
+				or math.floor((available - gap * math.max(0, count - 1)) / count)
 		end
 		extent = math.max(1, math.floor(extent))
 		local inner = horizontal
-			and { x = bounds.x + padding, y = bounds.y, w = available, h = bounds.h }
-			or { x = bounds.x, y = bounds.y + padding, w = bounds.w, h = available }
-		if horizontal then
-			inner.y = bounds.y + padding; inner.h = math.max(1, bounds.h - padding * 2)
-		else
-			inner.x = bounds.x + padding; inner.w = math.max(1, bounds.w - padding * 2)
-		end
+			and { x = bounds.x + leadingInset, y = bounds.y + crossInset, w = available,
+				h = math.max(1, bounds.h - crossInset * 2) }
+			or { x = bounds.x + crossInset, y = bounds.y + leadingInset,
+				w = math.max(1, bounds.w - crossInset * 2), h = available }
 		local start = horizontal and inner.x or inner.y
 		self:_layoutSequential(mainStart, inner, horizontal, start, extent, gap)
 		if #mainEnd > 0 then
@@ -380,7 +388,7 @@ function Tabs.create(options)
 			local finish = horizontal and (inner.x + inner.w) or (inner.y + inner.h)
 			local endStart = finish - endSpan
 			self:_layoutSequential(mainEnd, inner, horizontal, endStart, extent, gap)
-			if options.separator ~= false then
+			if options.separator == true then
 				if not self.separator then self.separator = createSeparator(self.parent, options) end
 				local offset = math.max(0, number(options.separatorOffset, 6))
 				if horizontal then

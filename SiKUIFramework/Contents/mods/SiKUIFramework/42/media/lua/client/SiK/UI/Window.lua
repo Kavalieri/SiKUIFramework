@@ -121,6 +121,27 @@ local function fitText(text, maxWidth, font)
 	return best
 end
 
+--- Keeps an editor identity readable by sacrificing the optional zone/context
+--- suffix before its prefix/name. Consumers pass data only, never offsets.
+function Window.composeHeaderTitle(parts, maxWidth, font)
+	parts = type(parts) == "table" and parts or { name = parts }
+	local separator = tostring(parts.separator or " · ")
+	local primary = tostring(parts.prefix or "")
+	local name = tostring(parts.name or "")
+	if primary ~= "" and name ~= "" then primary = primary .. separator .. name
+	elseif name ~= "" then primary = name end
+	local zone = tostring(parts.zone or parts.context or "")
+	if zone == "" then return fitText(primary, maxWidth, font) end
+	if measuredWidth(primary .. separator .. zone, font) <= maxWidth then
+		return primary .. separator .. zone
+	end
+	local zoneBudget = math.max(0, maxWidth - measuredWidth(primary .. separator, font))
+	if zoneBudget > measuredWidth("...", font) then
+		return primary .. separator .. fitText(zone, zoneBudget, font)
+	end
+	return fitText(primary, maxWidth, font)
+end
+
 local function statusValue(value)
 	if type(value) ~= "table" then return displayValue(value), "textMuted" end
 	return displayValue(value), value.tone or "textMuted", value.color
@@ -142,6 +163,7 @@ local function declarativeHeader(options)
 	if statusVisible == false then status = nil end
 	return {
 		productName = source.productName or options.productName or options.title or "",
+		titleParts = source.titleParts or options.titleParts,
 		contextName = contextName,
 		status = status,
 		operation = operation,
@@ -498,6 +520,11 @@ function Window.reflow(panel)
 	end
 	local rects = Window.chromeRects(panel)
 	if panel.titleControl then
+		if panel._sikHeaderTitleParts then
+			panel._sikHeaderText = Window.composeHeaderTitle(panel._sikHeaderTitleParts,
+				rects.title.w, UIFont.Medium or UIFont.Small)
+			panel.titleControl:setText(panel._sikHeaderText)
+		end
 		panel.titleControl:setX(rects.title.x); panel.titleControl:setY(rects.title.y)
 		panel.titleControl:setWidth(math.max(1, rects.title.w))
 		panel.titleControl:setHeight(rects.title.h)
@@ -668,12 +695,19 @@ function Window.apply(panel, options)
 	panel.childParent = panel
 	panel.playerNum = bounds.playerNum
 	panel.headerHeight = math.max(1, n(options.headerHeight, 52))
-	panel.windowPadding = math.max(0, n(options.padding, 14))
+	-- Window owns this inset once. Children receive contentRect(), never add a
+	-- second shell-level margin merely because they are a tab or a modal.
+	panel.windowPadding = math.max(0, n(options.padding, 12))
 	panel.contentPadding = math.max(0, n(options.contentPadding, panel.windowPadding))
 	local header = declarativeHeader(options)
 	local footer = declarativeFooter(options)
 	local separator = tostring(header.separator)
+	panel._sikHeaderTitleParts = header.titleParts
 	panel._sikHeaderProduct = tostring(header.productName or "")
+	if panel._sikHeaderTitleParts then
+		panel._sikHeaderProduct = Window.composeHeaderTitle(panel._sikHeaderTitleParts,
+			panel.width - panel.windowPadding * 2, UIFont.Medium or UIFont.Small)
+	end
 	panel._sikHeaderContext = header.contextName
 	panel._sikHeaderSeparator = separator
 	panel._sikHeaderText = composeHeaderText(panel._sikHeaderProduct,
@@ -801,6 +835,7 @@ function Window.apply(panel, options)
 	function panel:contentRect() return Window.chromeRects(self).content end
 	function panel:setHeader(spec, contextName)
 		if type(spec) == "table" then
+			if spec.titleParts ~= nil then self._sikHeaderTitleParts = spec.titleParts end
 			if spec.productName ~= nil then self._sikHeaderProduct = tostring(spec.productName) end
 			if spec.contextName ~= nil then self._sikHeaderContext = spec.contextName end
 			if spec.contextVisible ~= nil then
@@ -828,6 +863,11 @@ function Window.apply(panel, options)
 		else
 			self._sikHeaderProduct = tostring(spec or "")
 			if contextName ~= nil then self._sikHeaderContext = contextName end
+		end
+		if self._sikHeaderTitleParts then
+			self._sikHeaderProduct = Window.composeHeaderTitle(self._sikHeaderTitleParts,
+				self.width - self.windowPadding * 2, UIFont.Medium or UIFont.Small)
+			self._sikHeaderContext = nil
 		end
 		self._sikHeaderText = composeHeaderText(self._sikHeaderProduct,
 			self._sikHeaderContext, self._sikHeaderSeparator)

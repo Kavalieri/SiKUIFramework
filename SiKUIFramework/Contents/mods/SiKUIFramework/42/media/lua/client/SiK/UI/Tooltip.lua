@@ -366,11 +366,12 @@ local function transientPanel(options)
 	-- Explanatory BlockHeader help carries guidance rather than the short label
 	-- of an item tooltip. Give it a readable line length and only contract when
 	-- the player's safe viewport genuinely cannot provide that width.
-	local defaultWidth = profile == "informational" and 680 or 320
+	local defaultWidth = profile == "informational" and 680
+		or (profile == "rail" and 280 or 320)
 	local viewportMargin = profile == "informational" and 32 or 0
 	local availableWidth = math.max(1, safe.w - viewportMargin)
 	local requestedWidth
-	if profile == "option" then
+	if profile == "option" or profile == "rail" then
 		local text = tostring(content.text or options.text or "")
 		local manager = type(getTextManager) == "function" and getTextManager() or nil
 		local textWidth = manager and manager.MeasureStringX
@@ -384,7 +385,7 @@ local function transientPanel(options)
 	local document = Tooltip.createDocument({ sections = { {
 		title = content.title, text = content.text or options.text,
 		tone = content.tone or options.tone, framed = false,
-		align = profile == "option" and "right" or content.align,
+		align = (profile == "option" or profile == "rail") and "right" or content.align,
 	} } })
 	local measured = document:measure(width)
 	local panel = ISPanel:new(0, 0, measured.width, math.min(measured.height, math.max(1, safe.h)))
@@ -392,7 +393,7 @@ local function transientPanel(options)
 	panel._sikTooltipDocument = document
 	panel.prerender = function(self)
 		local frameOptions = options
-		if profile == "option" and options.backgroundColor == nil then
+		if (profile == "option" or profile == "rail") and options.backgroundColor == nil then
 			local theme = SiK.UI.Theme.tokens(options.theme)
 			frameOptions = {
 				theme = options.theme,

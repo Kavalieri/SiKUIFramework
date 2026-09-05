@@ -28,6 +28,11 @@ function Card.metrics(variant)
 		return { minWidth = 260, minHeight = 148, iconSize = 40, padding = 8,
 			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
 	end
+	if variant == "output" then
+		return { minWidth = 260, minHeight = 184, iconSize = 40, padding = 8,
+			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 24,
+			requirementIconSize = 32 }
+	end
 	if variant == "palette" then
 		local padding, swatchHeight, titleGap = 8, 50, 5
 		return { minWidth = 160,
@@ -74,6 +79,30 @@ function Card.create(options)
 		playerNum = options.playerNum,
 	})
 
+	local function normalizeRequirement(value)
+		if type(value) == "table" then
+			return {
+				text = tostring(value.text or value.label or ""),
+				icon = value.icon or value.texture,
+				state = value.state ~= nil and value.state or value.met,
+				tone = value.tone,
+				iconSize = value.iconSize,
+			}
+		end
+		return tostring(value or "")
+	end
+
+	local function layoutRequirement()
+		if not instance.requirementRow then return end
+		local actionReserve = instance.actionButton and (metrics.actionHeight + metrics.gap) or 0
+		local bodyTop = metrics.padding + metrics.headerHeight + metrics.gap
+		local bodyHeight = math.max(1, panel.height - bodyTop - metrics.padding - actionReserve)
+		local rowHeight = math.min(bodyHeight, instance.requirementRow.height)
+		instance.requirementRow:setX(metrics.padding)
+		instance.requirementRow:setY(bodyTop + math.max(0, bodyHeight - rowHeight))
+		instance.requirementRow:reflow(math.max(1, panel.width - metrics.padding * 2))
+	end
+
 	function instance:setData(data)
 		data = type(data) == "table" and data or {}
 		self.data = {
@@ -83,7 +112,7 @@ function Card.create(options)
 			description = tostring(data.description or options.description or ""),
 			status = tostring(data.status or data.statusLabel or options.status or options.statusLabel or ""),
 			statusTone = data.statusTone or data.tone or options.statusTone or options.tone or "textMuted",
-			requirement = tostring(data.requirement or options.requirement or ""),
+			requirement = normalizeRequirement(data.requirement or options.requirement),
 			actionLabel = tostring(data.actionLabel or options.actionLabel or ""),
 			swatches = data.swatches or options.swatches,
 			selected = data.selected ~= nil and data.selected == true or options.selected == true,
@@ -104,6 +133,10 @@ function Card.create(options)
 			end
 		end
 		if data.payload ~= nil then self.payload = data.payload end
+		if self.requirementRow and type(self.data.requirement) == "table" then
+			self.requirementRow:setData(self.data.requirement)
+			layoutRequirement()
+		end
 		return self
 	end
 
@@ -134,6 +167,9 @@ function Card.create(options)
 		local actionReserve = instance.actionButton and (metrics.actionHeight + metrics.gap) or 0
 		local bodyTop = metrics.padding + metrics.headerHeight + metrics.gap
 		local bodyHeight = math.max(1, self.height - bodyTop - metrics.padding - actionReserve)
+		if instance.requirementRow then
+			bodyHeight = math.max(1, bodyHeight - instance.requirementRow.height - metrics.gap)
+		end
 		if type(data.swatches) == "table" and #data.swatches > 0 then
 			local previewW = math.max(1, self.width - metrics.padding * 2)
 			local previewH = metrics.swatchHeight or 34
@@ -162,8 +198,9 @@ function Card.create(options)
 		end
 		local width = math.max(1, self.width - x - metrics.padding)
 		local line = fontHeight(UIFont.Small)
+		local requirementText = type(data.requirement) == "string" and data.requirement or ""
 		local rows = (data.value ~= "" and 1 or 0)
-			+ (data.description ~= "" and 1 or 0) + (data.requirement ~= "" and 1 or 0)
+			+ (data.description ~= "" and 1 or 0) + (requirementText ~= "" and 1 or 0)
 			+ (data.status ~= "" and 1 or 0)
 		local textHeight = rows > 0 and rows * line + math.max(0, rows - 1) * 2 or 0
 		local y = bodyTop + math.max(0, math.floor((bodyHeight - textHeight) / 2))
@@ -177,7 +214,7 @@ function Card.create(options)
 			theme.accent.r, theme.accent.g, theme.accent.b, alpha, UIFont.Small) end
 		if data.description ~= "" then self:drawText(clipped(data.description, width, UIFont.Small), x, nextLineY(),
 			theme.textMuted.r, theme.textMuted.g, theme.textMuted.b, alpha, UIFont.Small) end
-		if data.requirement ~= "" then self:drawText(clipped(data.requirement, width, UIFont.Small), x, nextLineY(),
+		if requirementText ~= "" then self:drawText(clipped(requirementText, width, UIFont.Small), x, nextLineY(),
 			theme.warning.r, theme.warning.g, theme.warning.b, alpha, UIFont.Small) end
 		if data.status ~= "" then
 			y = nextLineY()
@@ -202,6 +239,18 @@ function Card.create(options)
 				if type(options.onActivate) == "function" then options.onActivate(instance.payload, instance) end
 				return true
 			end,
+		})
+	end
+
+	if type(options.requirement) == "table" then
+		instance.requirementRow = SiK.UI.Controls.requirementRow(panel, {
+			x = metrics.padding, y = 0, w = math.max(1, panel.width - metrics.padding * 2),
+			text = options.requirement.text or options.requirement.label,
+			icon = options.requirement.icon or options.requirement.texture,
+			state = options.requirement.state ~= nil and options.requirement.state or options.requirement.met,
+			tone = options.requirement.tone,
+			iconSize = options.requirement.iconSize or metrics.requirementIconSize or metrics.iconSize,
+			playerNum = options.playerNum, theme = options.theme,
 		})
 	end
 
@@ -234,6 +283,7 @@ function Card.create(options)
 			})
 			self.header:reflow(math.max(1, self.panel.width - metrics.padding * 2))
 		end
+		layoutRequirement()
 		return self
 	end
 	function instance:dispose()

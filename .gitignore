@@ -1,0 +1,14 @@
+.idea/
+.vscode/
+*.log
+*.tmp
+catalog/generated/
+tests/output/
+# QA fixtures and authoring suites remain local/QA-owned and are not part of
+# the player-facing public repository or Workshop artifact.
+tests/
+AGENTS.md
+CLAUDE.md
+*.tar
+*.tar.gz
+QA_*.json
