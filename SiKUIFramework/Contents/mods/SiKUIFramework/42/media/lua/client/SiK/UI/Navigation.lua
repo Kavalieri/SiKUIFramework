@@ -56,6 +56,19 @@ local function splitBounds(bounds, placement, extent, gap)
 	return bar, content
 end
 
+local function minimumExactRailExtent(items, placement, crossInset)
+	local minimum = 1
+	for index = 1, #(items or {}) do
+		local item = items[index]
+		if item and item.iconExact == true and type(item.icon) == "table" then
+			local native = (placement == "left" or placement == "right")
+				and tonumber(item.icon.width) or tonumber(item.icon.height)
+			if native then minimum = math.max(minimum, native + crossInset * 2) end
+		end
+	end
+	return minimum
+end
+
 function Navigation.create(options)
 	options = options or {}
 	if type(options.parent) ~= "table" then return nil, "invalid_parent" end
@@ -76,8 +89,10 @@ function Navigation.create(options)
 			number(options.sideExtent, initialMetrics.window
 				and initialMetrics.window.railWidth or initialMetrics.rowHeight * 2))
 		or initialMetrics.rowHeight + SiK.UI.Metrics.spacing.xs
+	local initialCrossInset = math.max(0, number(options.railCrossInset, 12))
 	local initialExtent = math.max(1,
-		number(options.extent or options.barSize, initialDefaultExtent))
+		number(options.extent or options.barSize, initialDefaultExtent),
+		minimumExactRailExtent(options.items, placement, initialCrossInset))
 	local initialBar, initialContent = splitBounds(initialBounds, placement,
 		initialExtent, math.max(0, number(options.contentGap, 0)))
 	instance.bounds = initialBounds
@@ -150,6 +165,10 @@ function Navigation.create(options)
 
 	function instance:getHost(key)
 		return self.hosts[key]
+	end
+
+	function instance:getButton(key)
+		return self.tabs and self.tabs:getButton(key) or nil
 	end
 
 	-- Adopts an existing product panel into a destination owned by this
@@ -245,7 +264,9 @@ function Navigation.create(options)
 			and math.max(metrics.rowHeight, number(options.sideExtent,
 				metrics.window and metrics.window.railWidth or metrics.rowHeight * 2))
 			or metrics.rowHeight + SiK.UI.Metrics.spacing.xs
-		local extent = math.max(1, number(options.extent or options.barSize, defaultExtent))
+		local crossInset = math.max(0, number(options.railCrossInset, 12))
+		local extent = math.max(1, number(options.extent or options.barSize, defaultExtent),
+			minimumExactRailExtent(self.items, placement, crossInset))
 		local gap = math.max(0, number(options.contentGap, 0))
 		local bar, content = splitBounds(bounds, placement, extent, gap)
 		if self.barVisible == false then content = SiK.UI.Layout.resolveRect(bounds, nil, 1) end

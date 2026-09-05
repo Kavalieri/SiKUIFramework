@@ -197,6 +197,7 @@ end
 
 local function tableFactory(parent, props, context)
 	local options = boundsOptions(parent, props, context)
+	options.nodeId = props.nodeId
 	-- A declarative Block is the table's sole visual container.  Keep Table's
 	-- header/rows/scroll lifecycle without painting another frame or padding.
 	-- Layout wrappers may sit between both, so resolve the established parent
@@ -849,9 +850,13 @@ Factories.definitions = Factories.definitions or {
                 capture = listCapture, restore = listRestore, update = listUpdate,
                 preserve = listPreserve, reflow = listReflow,
                 validateAdopt = requireMethods({ "setData", "captureState", "refresh", "reflow" }) },
-        table = { runtimeFactory = "SiK.UI.Table.create", create = tableFactory,
+		table = { runtimeFactory = "SiK.UI.Table.create", create = tableFactory,
 		allowedChildren = {}, parents = { "container", "block" },
-                capture = tableCapture, restore = tableRestore, update = tableUpdate,
+			validateNode = function(node)
+				local columns, reason = SiK.UI.Table.normalizeColumns(node.columns)
+				return columns ~= nil, columns and nil or "columns:" .. tostring(reason)
+			end,
+				capture = tableCapture, restore = tableRestore, update = tableUpdate,
                 preserve = tablePreserve, reflow = tableReflow,
                 validateAdopt = requireMethods({ "setRows", "setColumns", "captureState", "restoreState", "reflow" }) },
         block = { runtimeFactory = "SiK.UI.Block.create", create = blockFactory,
@@ -896,6 +901,7 @@ function Factories.registerDefaults()
                         capture = definition.capture, restore = definition.restore,
                         preserve = definition.preserve, update = definition.update, reflow = definition.reflow,
 			validateAdopt = definition.validateAdopt,
+			validateNode = definition.validateNode,
 			allowedChildren = definition.allowedChildren,
 			parents = definition.parents,
 		})

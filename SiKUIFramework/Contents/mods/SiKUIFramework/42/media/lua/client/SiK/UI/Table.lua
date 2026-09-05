@@ -139,13 +139,43 @@ local function blockContentOwner(parent)
 	return nil, nil
 end
 
-local function validColumns(columns)
-	if type(columns) ~= "table" or #columns < 2 or #columns > 5 then return false end
+local function normalizedColumns(columns)
+	if type(columns) ~= "table" or #columns < 2 or #columns > 5 then
+		return nil, "column_count"
+	end
+	local result, keys = {}, {}
 	for index = 1, #columns do
 		local column = columns[index]
-		if type(column) ~= "table" or type(column.key) ~= "string" or column.key == "" then return false end
+		if type(column) ~= "table" or type(column.key) ~= "string" or column.key == "" then
+			return nil, "column_key"
+		end
+		if keys[column.key] then return nil, "column_key_duplicate:" .. column.key end
+		keys[column.key] = true
+		if column.title ~= nil and type(column.title) ~= "string" then return nil, "column_title" end
+		if column.label ~= nil and type(column.label) ~= "string" then return nil, "column_label" end
+		local flex = column.flex
+		if flex == nil then flex = column.weight end
+		if flex ~= nil and (tonumber(flex) == nil or tonumber(flex) <= 0) then
+			return nil, "column_flex"
+		end
+		if column.flex ~= nil and column.weight ~= nil
+			and tonumber(column.flex) ~= tonumber(column.weight) then
+			return nil, "column_flex_conflict"
+		end
+		local copy = {}
+		for key, value in pairs(column) do copy[key] = value end
+		copy.title = copy.title or copy.label
+		copy.flex = flex
+		result[index] = copy
 	end
-	return true
+	return result
+end
+
+--- Canonical typed boundary for imperative and declarative table schemas.
+--- Returns a defensive normalized copy; callers never retain a partly valid
+--- descriptor or need to implement their own label/weight compatibility path.
+function Table.normalizeColumns(columns)
+	return normalizedColumns(columns)
 end
 
 local function copyOptions(source)
@@ -243,7 +273,7 @@ function Table.metrics(options)
 end
 
 local function measuredWidth(spec, font)
-	local title = spec.title or SiK.UI.resolveText(spec.titleKey, spec.key) or ""
+	local title = spec.title or spec.label or SiK.UI.resolveText(spec.titleKey, spec.key) or ""
 	local widest = measure(spec.font or font, title)
 	if spec.sortable ~= false then widest = widest + 18 end
 	for index = 1, #(spec.measureValues or {}) do
@@ -263,7 +293,7 @@ local function layoutKey(width, columns, options, metrics)
 		tostring(metrics.right), tostring(metrics.cellPadding) }
 	for index = 1, #columns do
 		local spec = columns[index]
-		parts[#parts + 1] = table.concat({ tostring(spec.key), tostring(spec.flex or ""),
+		parts[#parts + 1] = table.concat({ tostring(spec.key), tostring(spec.flex or spec.weight or ""),
 			tostring(spec.width or ""), tostring(spec.widthFraction or ""),
 			tostring(spec.minWidth or spec.min or ""), tostring(spec.hardMinWidth or ""),
 			tostring(spec.start or ""), tostring(spec.startFraction or ""),
@@ -281,7 +311,7 @@ end
 
 function Table.resolveColumns(width, columns, options)
 	width = math.max(1, numberOr(width, 1))
-	columns, options = columns or {}, options or {}
+	columns, options = normalizedColumns(columns or {}) or {}, options or {}
 	local metrics = Table.metrics(options)
 	local key = layoutKey(width, columns, options, metrics)
 	local cached = columns._sikLayoutCache
@@ -289,7 +319,7 @@ function Table.resolveColumns(width, columns, options)
 	local flow = false
 	for index = 1, #columns do
 		local spec = columns[index]
-		if spec.flex or spec.width or spec.widthFraction or spec.measureValues then flow = true break end
+		if spec.flex or spec.weight or spec.width or spec.widthFraction or spec.measureValues then flow = true break end
 	end
 	local out = {}
 	if not flow then
@@ -298,7 +328,7 @@ function Table.resolveColumns(width, columns, options)
 			local first = edge(spec.start, spec.startFraction, width, 0)
 			local finish = math.max(first, edge(spec.finish, spec.finishFraction, width,
 				width - numberOr(spec.right, 0)))
-			out[index] = { key = spec.key, title = spec.title, titleKey = spec.titleKey,
+			out[index] = { key = spec.key, title = spec.title or spec.label, titleKey = spec.titleKey,
 				align = spec.align or "left", x = first, finish = finish,
 				width = finish - first, w = finish - first,
 				pad = numberOr(spec.pad, metrics.cellPadding), spec = spec }
@@ -311,9 +341,9 @@ function Table.resolveColumns(width, columns, options)
 		local spec = columns[index]
 		local saved = options.columnWidths and tonumber(options.columnWidths[spec.key]) or nil
 		if saved then widths[index] = math.max(columnMinimum(spec, metrics.font), math.floor(saved))
-		elseif spec.flex then
+		elseif spec.flex or spec.weight then
 			widths[index] = 0
-			flexTotal = flexTotal + math.max(0, numberOr(spec.flex, 0))
+			flexTotal = flexTotal + math.max(0, numberOr(spec.flex or spec.weight, 0))
 			flexMinimum = flexMinimum + math.max(0, numberOr(spec.minWidth or spec.min, 0))
 		elseif spec.widthFraction then
 			widths[index] = math.max(numberOr(spec.minWidth or spec.min, 0),
@@ -328,12 +358,12 @@ function Table.resolveColumns(width, columns, options)
 	local x = metrics.left
 	for index = 1, #columns do
 		local spec, colW = columns[index], widths[index]
-		if spec.flex and not (options.columnWidths and tonumber(options.columnWidths[spec.key])) then
+		if (spec.flex or spec.weight) and not (options.columnWidths and tonumber(options.columnWidths[spec.key])) then
 			colW = math.floor(math.max(0, numberOr(spec.minWidth or spec.min, 0)) * shrink)
-			if flexExtra > 0 then colW = colW + math.floor(flexExtra * numberOr(spec.flex, 0) / math.max(1, flexTotal)) end
+			if flexExtra > 0 then colW = colW + math.floor(flexExtra * numberOr(spec.flex or spec.weight, 0) / math.max(1, flexTotal)) end
 			colW = math.max(numberOr(spec.hardMinWidth, 24), colW)
 		end
-		out[index] = { key = spec.key, title = spec.title, titleKey = spec.titleKey,
+		out[index] = { key = spec.key, title = spec.title or spec.label, titleKey = spec.titleKey,
 			align = spec.align or "left", x = x, finish = x + colW, width = colW, w = colW,
 			pad = numberOr(spec.pad, metrics.cellPadding), spec = spec }
 		x = x + colW + metrics.gap
@@ -344,6 +374,28 @@ function Table.resolveColumns(width, columns, options)
 	end
 	columns._sikLayoutCache = { key = key, layout = out }
 	return out
+end
+
+--- Returns the exact height that a non-direct Table will claim for a row set.
+--- Builder and imperative consumers use this same calculation, including the
+--- real font-derived header height, so a table never outgrows its parent Block.
+function Table.intrinsicHeight(rowCount, options)
+	options = options or {}
+	local metrics = Table.metrics(options)
+	local count = math.max(0, math.floor(numberOr(rowCount, 0)))
+	local minimumRows = math.max(0, math.floor(numberOr(options.minRows, 1)))
+	local maximumRows = tonumber(options.maxRows)
+	count = math.max(minimumRows, count)
+	if maximumRows then count = math.min(count, math.max(minimumRows,
+		math.floor(maximumRows))) end
+	local pagerHeight = options.pagination and math.max(1,
+		numberOr(options.pagination.height,
+			SiK.UI.Metrics.tokens(options.metrics).table.pagerHeight)) or 0
+	local height = metrics.headerHeight + pagerHeight + count * metrics.rowHeight
+	height = math.max(numberOr(options.minHeight, 0), height)
+	if options.maxHeight ~= nil then height = math.min(height,
+		math.max(1, numberOr(options.maxHeight, height))) end
+	return math.max(1, height)
 end
 
 function Table.drawExpansionPrefix(panel, options)
@@ -957,8 +1009,9 @@ end
 
 function TableInstance:setColumns(columns)
 	if self.disposed then return nil, "disposed" end
-	if not validColumns(columns) then return nil, "invalid_columns" end
-	self.columns = columns
+	local normalized, reason = normalizedColumns(columns)
+	if not normalized then return nil, "invalid_columns:" .. tostring(reason) end
+	self.columns = normalized
 	self._geometrySignature = nil
 	self:_syncGeometry()
 	return self
@@ -1333,7 +1386,9 @@ function Table.create(options)
 	-- created and therefore no orphan panel can be painted.
 	local block = blockContentOwner(options.parent)
 	if options.embedded ~= true or not block then return nil, "table_requires_block" end
-	if not validColumns(options.columns) then return nil, "invalid_columns" end
+	local columns, columnsReason = normalizedColumns(options.columns)
+	if not columns then return nil, "invalid_columns:" .. tostring(columnsReason) end
+	options.columns = columns
 	if options.expansion ~= nil and (type(options.expansion) ~= "table"
 		or type(options.expansion.childrenOf) ~= "function") then return nil, "invalid_expansion" end
 	if options.pagination ~= nil and (type(options.pagination) ~= "table"

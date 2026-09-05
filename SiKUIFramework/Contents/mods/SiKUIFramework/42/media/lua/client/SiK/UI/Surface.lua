@@ -314,6 +314,10 @@ local function validateNode(node, state, path, parentType)
 	end
 	local ok, err = validateLayout(node.layout, state.profiles, state.references, path .. ".layout")
 	if not ok then return false, err end
+	if type(contract.validateNode) == "function" then
+		ok, err = contract.validateNode(node)
+		if not ok then return false, path .. "." .. tostring(err or "invalid component shape") end
+	end
 	ok, err = namedBindings(node.props or {}, path .. ".props", state.references)
 	if not ok then return false, err end
 	local eventSeen = {}

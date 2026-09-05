@@ -22,7 +22,7 @@ end
 local function widgetSize(widget, axis)
 	if not widget then return 0 end
 	local getter = axis == "width" and widget.getWidth or widget.getHeight
-	if type(getter) == "function" then
+	if getter then
 		local ok, value = pcall(getter, widget)
 		if ok and tonumber(value) then return tonumber(value) end
 	end
@@ -171,10 +171,13 @@ local function decorateTabButton(button, item, placement, options)
 			-- the descriptor table reaches ISUIElement:drawTextureScaledAspect and
 			-- raises once per frame. Exact rendering still needs the descriptor to
 			-- verify its declared slot before resolving it internally.
-			draw(self, exact and (item.icon or item.texture) or self.texture,
+			local drawn, drawReason = draw(self,
+				exact and (item.icon or item.texture) or self.texture,
 				math.floor((width - iconSize) / 2),
 				math.floor((height - iconSize) / 2), iconSize, iconSize,
 				{ alpha = tint.a, r = tint.r, g = tint.g, b = tint.b })
+			self._sikIconDrawn, self._sikIconDrawReason = drawn == true, drawReason
+			self._sikIconDrawWidth, self._sikIconDrawHeight = iconSize, iconSize
 		end
 		if selected then
 			local color = resolvedColor(options.selectedBorderColor, "accent", options.theme)

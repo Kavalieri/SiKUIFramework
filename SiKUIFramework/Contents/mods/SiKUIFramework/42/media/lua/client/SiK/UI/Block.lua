@@ -233,10 +233,19 @@ function BlockInstance:beginColumn()
 				if panel.parent and panel.parent.removeChild then panel.parent:removeChild(panel) end
 				owner.childParent:addChild(panel)
 			end
-			local block = panel._sikUiBlock
-			if block then block:setBounds(x, y, w, h)
-			else SiK.UI.Layout.apply(panel, { x = x, y = y,
-				w = w or panel.width, h = h or panel.height }) end
+			-- Composite handles (Table, CardCollection, etc.) own internal
+			-- geometry that cannot be updated by moving their root panel alone.
+			-- Give the public handle the resolved rectangle so every descendant
+			-- reflows from the same source of truth.
+			if widget ~= panel and widget.reflow then
+				widget:reflow({ x = x, y = y, w = w or panel.width,
+					h = h or panel.height })
+			else
+				local block = panel._sikUiBlock
+				if block then block:setBounds(x, y, w, h)
+				else SiK.UI.Layout.apply(panel, { x = x, y = y,
+					w = w or panel.width, h = h or panel.height }) end
+			end
 		end })
 	column.parent = self.childParent
 	function column:finish()

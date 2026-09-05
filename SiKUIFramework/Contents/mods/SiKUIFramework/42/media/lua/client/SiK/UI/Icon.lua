@@ -87,8 +87,11 @@ function Icon.drawExact(target, keyOrTexture, x, y, width, height, options)
 		or tonumber(meta.height) ~= tonumber(height) then
 		return false, "asset_slot_mismatch"
 	end
-	if type(target) ~= "table" or (type(target.drawTextureScaled) ~= "function"
-		and type(target.drawTexture) ~= "function") then
+	-- Kahlua exposes inherited ISUIElement methods as callable members whose
+	-- reported Lua type is not consistently `function`. Presence is the stable
+	-- capability check used by the rest of the framework.
+	if type(target) ~= "table" or (not target.drawTextureScaled
+		and not target.drawTexture) then
 		return false, "unsupported_native_renderer"
 	end
 	local texture = Icon.resolve(keyOrTexture)
@@ -97,7 +100,7 @@ function Icon.drawExact(target, keyOrTexture, x, y, width, height, options)
 	-- PZ's native drawTexture overload is not stable for mod-owned textures on
 	-- every B42 UI path. drawTextureScaled uses the reliable renderer while the
 	-- strict metadata check above guarantees a 1:1 target (no corrective scale).
-	if type(target.drawTextureScaled) == "function" then
+	if target.drawTextureScaled then
 		target:drawTextureScaled(texture, x, y, width, height,
 			tonumber(options.alpha) or 1, tonumber(options.r) or 1,
 			 tonumber(options.g) or 1, tonumber(options.b) or 1)
@@ -118,7 +121,7 @@ function Icon.drawRotatedExact(target, keyOrTexture, x, y, width, height, angle)
 		or tonumber(meta.height) ~= tonumber(height) then
 		return false, "asset_slot_mismatch"
 	end
-	if type(target) ~= "table" or type(target.DrawTextureAngle) ~= "function" then
+	if type(target) ~= "table" or not target.DrawTextureAngle then
 		return false, "unsupported_native_rotation"
 	end
 	local texture = Icon.resolve(keyOrTexture)

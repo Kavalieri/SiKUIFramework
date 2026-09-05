@@ -6,6 +6,7 @@ require "SiK/UI/Viewport"
 require "SiK/UI/Layout"
 require "SiK/UI/Container"
 require "SiK/UI/Controls"
+require "SiK/UI/Table"
 
 local Builder = SiK.UI.Builder or {}
 SiK.UI.Namespace.define("Builder", Builder)
@@ -349,22 +350,7 @@ intrinsicHeight = function(node, layout, context, parentMode, measuring)
 			local model = nodeProperty(node, "data", context)
 			local rows = type(model) == "table" and (model.rows or model) or {}
 			local rowCount = type(rows) == "table" and #rows or 0
-			local minimumRows = math.max(0, math.floor(n(runtime.minRows, 1)))
-			local maximumRows = tonumber(runtime.maxRows)
-			if maximumRows then rowCount = math.min(rowCount, math.max(minimumRows,
-				math.floor(maximumRows))) end
-			rowCount = math.max(rowCount, minimumRows)
-			local headerHeight = math.max(1, n(runtime.headerHeight, tableMetrics.headerHeight))
-			local rowHeight = math.max(1, n(runtime.rowHeight, tableMetrics.rowHeight))
-			local measured = headerHeight + rowCount * rowHeight
-			if runtime.pagination then
-				measured = measured + math.max(1, n(runtime.pagination.height,
-					tableMetrics.pagerHeight))
-			end
-			measured = math.max(n(runtime.minHeight, 0), measured)
-			if runtime.maxHeight ~= nil then measured = math.min(measured,
-				math.max(1, n(runtime.maxHeight, measured))) end
-			return math.max(1, measured)
+			return SiK.UI.Table.intrinsicHeight(rowCount, runtime)
 		end
 		return math.max(120, tableMetrics.headerHeight + tableMetrics.rowHeight * 2)
 	end
@@ -623,6 +609,13 @@ end
 local buildNode
 
 local function recordHandle(handle, node, tree, props, owned, placement, adopted)
+	if tree.records[node.id] or tree.nodes[node.id] then
+		error("SiK UI duplicate runtime node: " .. tostring(node.id), 2)
+	end
+	if tree.handleOwners[handle] then
+		error("SiK UI runtime handle reused by " .. tostring(node.id)
+			.. " and " .. tostring(tree.handleOwners[handle]), 2)
+	end
 	local function tag(widget, suffix)
 		if type(widget) ~= "table" then return end
 		widget._sikNodeId = tostring(node.id) .. (suffix or "")
@@ -639,6 +632,7 @@ local function recordHandle(handle, node, tree, props, owned, placement, adopted
 		adopted = adopted == true,
 		typeId = node.type, placement = placement, contract = factoryContracts[node.type] or {} }
 	tree.records[node.id] = record
+	tree.handleOwners[handle] = node.id
 	tree.recordOrder[#tree.recordOrder + 1] = record
 	return record
 end
@@ -827,6 +821,41 @@ local function recordBounds(record, tree, context)
 	local area = childArea(parent.handle, parentBounds)
 	local rects = resolveChildGeometry(parent.node, area, context)
 	return rects[placement.index], rects[placement.index] and nil or "layout_child_missing"
+end
+
+local function sameNumber(left, right)
+	return math.abs(n(left, 0) - n(right, 0)) <= 0.01
+end
+
+--- Runtime guard for the declarative/imperative boundary. It catches a
+--- factory that returns a second widget shape, a Table detached from its
+--- canonical root, or a composite that silently ignores Builder geometry.
+local function validateRuntimeCoherence(tree)
+	local tableRoots = {}
+	for index = 1, #tree.recordOrder do
+		local record = tree.recordOrder[index]
+		if tree.records[record.node.id] ~= record then
+			return nil, "record_identity:" .. tostring(record.node.id)
+		end
+		if record.typeId == "table" then
+			local handle, expected = record.handle, record.props and record.props.bounds
+			if type(handle) ~= "table" or handle._sikUiComponent ~= "table"
+				or type(handle.panel) ~= "table" or handle.panel._sikUiTable ~= handle then
+				return nil, "table_identity:" .. tostring(record.node.id)
+			end
+			if tableRoots[handle.panel] then
+				return nil, "table_root_duplicate:" .. tostring(record.node.id)
+			end
+			tableRoots[handle.panel] = record.node.id
+			local actual = handleBounds(handle)
+			if not actual or not expected or not sameNumber(actual.x, expected.x)
+				or not sameNumber(actual.y, expected.y) or not sameNumber(actual.w, expected.w)
+				or not sameNumber(actual.h, expected.h) then
+				return nil, "table_geometry:" .. tostring(record.node.id)
+			end
+		end
+	end
+	return true
 end
 
 local function rollbackRecords(tree, snapshots, context, lastIndex)
@@ -1116,6 +1145,17 @@ local function updateTree(tree, nextContext)
 			end
 		end
 	end
+	local coherent, coherenceReason = validateRuntimeCoherence(tree)
+	if not coherent then
+		local restored, rollbackReason = rollbackRecords(tree, snapshots, previousContext)
+		tree.context, tree.sourceContext, tree.profileId = previousContext, previousSource,
+			previousContext.profileId
+		refreshRuntimeLookup(tree, previousContext)
+		if not restored then
+			return nil, "surface_update_rollback_failed:coherence:" .. tostring(rollbackReason)
+		end
+		return nil, "surface_update_failed:coherence:" .. tostring(coherenceReason)
+	end
         local childSources = {}
 	for index = 1, #tree.surfaceOrder do
                 local child = tree.surfaceOrder[index]
@@ -1194,7 +1234,7 @@ function Builder.build(parent, spec, sourceContext)
 	local tree = { surfaceId = spec.surface.id, nodes = {}, order = {}, bindings = {},
 		records = {}, recordOrder = {}, surfaces = {}, surfaceOrder = {}, context = context,
 		profileId = context.profileId, parent = parent, spec = spec, sourceContext = copy(sourceContext),
-		adoptions = adoptions, adoptionSnapshots = {} }
+		adoptions = adoptions, adoptionSnapshots = {}, handleOwners = {} }
 	SiK.UI.observe("surface.build.begin", {
 		surfaceId = spec.surface.id,
 		parentWidth = parentWidth,
@@ -1207,6 +1247,11 @@ function Builder.build(parent, spec, sourceContext)
 		local rolledBack, rollbackReason = disposePartial(tree, true)
 		if not rolledBack then return nil, "surface_build_rollback_failed:" .. tostring(rollbackReason) end
 		return nil, tostring(result)
+	end
+	local coherent, coherenceReason = validateRuntimeCoherence(tree)
+	if not coherent then
+		disposePartial(tree, true)
+		return nil, "surface_build_failed:coherence:" .. tostring(coherenceReason)
 	end
 	local lookupOk, lookupReason = refreshRuntimeLookup(tree, context)
 	if not lookupOk then
@@ -1231,8 +1276,9 @@ function Builder.build(parent, spec, sourceContext)
                 restoreAdoptions(self, true)
                 self.nodes, self.order, self.records, self.recordOrder, self.bindings,
 			self.surfaces, self.surfaceOrder, self.context, self.root, self.parent,
-			self.spec, self.sourceContext, self.adoptions, self.adoptionSnapshots =
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
+			self.spec, self.sourceContext, self.adoptions, self.adoptionSnapshots,
+			self.handleOwners =
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 		SiK.UI.observe("surface.dispose", { surfaceId = self.surfaceId })
 		return true
 	end
