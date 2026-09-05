@@ -29,6 +29,15 @@ local function isPinned(item)
 		or item.pinned == true or item.footer == true)
 end
 
+local function exactIconMainExtent(item, horizontal, padding)
+	if not item or item.iconExact ~= true then return 0 end
+	local descriptor = item.icon or item.texture
+	if type(descriptor) ~= "table" then return 0 end
+	local size = horizontal and number(descriptor.width or descriptor.w, 0)
+		or number(descriptor.height or descriptor.h, 0)
+	return math.max(0, math.floor(size + padding * 2))
+end
+
 local function mouseOver(widget)
 	return widget and type(widget.isMouseOver) == "function" and widget:isMouseOver()
 end
@@ -384,6 +393,13 @@ function Tabs.create(options)
 				or math.floor((available - gap * math.max(0, count - 1)) / count)
 		end
 		extent = math.max(1, math.floor(extent))
+		-- Un asset exacto define su slot. Reducir el botón por debajo de sus
+		-- metadatos hacía que Icon.drawExact rechazase el dibujo silenciosamente.
+		-- El rail crece sobre su eje principal; nunca escala ni recorta la imagen.
+		for index = 1, #self.items do
+			extent = math.max(extent, exactIconMainExtent(self.items[index], horizontal,
+				math.max(0, number(options.iconPadding, 0))))
+		end
 		local inner = horizontal
 			and { x = bounds.x + leadingInset, y = bounds.y + crossInset, w = available,
 				h = math.max(1, bounds.h - crossInset * 2) }
