@@ -43,15 +43,29 @@ function Collection.create(options)
 		end
 		local width = math.max(1, math.floor((bounds.w - gap * (columns - 1)) / columns))
 		local y, rowHeight = bounds.y, 0
-		for index = 1, #self.entries do
-			local column = (index - 1) % columns
-			if column == 0 and index > 1 then y = y + rowHeight + gap; rowHeight = 0 end
-			local item = self.items[index] or {}
-			local height = math.max(1, tonumber(item.height) or tonumber(options.itemHeight) or 120)
-			local entry = self.entries[index]
-			if entry.reflow then entry:reflow({ x = bounds.x + column * (width + gap), y = y, w = width, h = height }) end
-			rowHeight = math.max(rowHeight, height)
+		local equalRowHeight = options.equalRowHeight ~= false
+		for rowStart = 1, #self.entries, columns do
+			local rowEnd = math.min(#self.entries, rowStart + columns - 1)
+			rowHeight = 0
+			for index = rowStart, rowEnd do
+				local item = self.items[index] or {}
+				rowHeight = math.max(rowHeight,
+					math.max(1, tonumber(item.height) or tonumber(options.itemHeight) or 120))
+			end
+			for index = rowStart, rowEnd do
+				local item = self.items[index] or {}
+				local itemHeight = math.max(1,
+					tonumber(item.height) or tonumber(options.itemHeight) or 120)
+				local column = index - rowStart
+				local entry = self.entries[index]
+				if entry.reflow then entry:reflow({
+					x = bounds.x + column * (width + gap), y = y, w = width,
+					h = equalRowHeight and rowHeight or itemHeight,
+				}) end
+			end
+			y = y + rowHeight + gap
 		end
+		if #self.entries > 0 then y = y - rowHeight - gap end
 		self.contentHeight = #self.entries > 0 and y + rowHeight - bounds.y or 0
 		self.columns = columns
 		return self

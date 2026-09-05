@@ -125,10 +125,10 @@ end
 --- suffix before its prefix/name. Consumers pass data only, never offsets.
 function Window.composeHeaderTitle(parts, maxWidth, font)
 	parts = type(parts) == "table" and parts or { name = parts }
-	-- Keep non-ASCII punctuation out of Lua source literals: Kahlua can decode
-	-- the source unit as a single-byte code page and render the middle dot as
-	-- '?'. Building the UTF-8 sequence is stable in every supported locale.
-	local defaultSeparator = " " .. string.char(0xC2, 0xB7) .. " "
+	-- Product punctuation must come from the consumer's Translator-backed i18n.
+	-- The neutral fallback stays ASCII: synthesising UTF-8 bytes with
+	-- string.char is rendered as mojibake by Kahlua on some PZ installations.
+	local defaultSeparator = " | "
 	local separator = tostring(parts.separator or defaultSeparator)
 	local primary = tostring(parts.prefix or "")
 	local name = tostring(parts.name or "")

@@ -135,7 +135,8 @@ function Container.resolveRects(area, entries, options)
                         result[index] = aligned({ x = content.x + column * (width + gap),
                                         y = rowY[row],
                                         w = width * span + gap * (span - 1), h = rowHeights[row] }, entries[index],
-                                entries[index].fill == true, entries[index].fill == true)
+                                entries[index].fill == true,
+				options.equalRowHeight ~= false or entries[index].fill == true)
                         column = column + span
                         if column >= columns then column = 0 end
                 end
@@ -372,7 +373,7 @@ function Container.create(options)
 			mode = mode, columns = self.options.columns, rowHeight = self.options.rowHeight,
 			minItemWidth = self.options.minItemWidth, padding = 0, gap = self.options.gap,
 			align = self.options.align, verticalAlign = self.options.verticalAlign,
-			justify = self.options.justify,
+			justify = self.options.justify, equalRowHeight = self.options.equalRowHeight,
 		})
 		for index = 1, #flowItems do
 			if rects[index] then SiK.UI.Layout.apply(flowItems[index].widget, rects[index]) end

@@ -1385,7 +1385,7 @@ function Table.create(options)
 	local minimumHeight = math.max(0, numberOr(options.minHeight, 0))
 	local maximumHeight = tonumber(options.maxHeight)
 	if maximumHeight then maximumHeight = math.max(minimumHeight, maximumHeight) end
-	local instance = setmetatable({ root = root, block = block,
+	local instance = setmetatable({ root = root, panel = root.panel, block = block,
 		scroll = scroll, header = header,
 		blockHeader = blockHeader, pager = pager, emptyPanel = emptyPanel,
 		columns = options.columns, columnLayout = {},
