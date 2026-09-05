@@ -131,11 +131,19 @@ local function decorateTabButton(button, item, placement, options)
 		local iconSize = options.iconFit == "fill"
 			and math.min(availableW, availableH)
 			or math.min(self.iconSize * scale, availableW, availableH)
-		if self.texture then
+		local exact = item.iconExact == true or options.iconExact == true
+		-- Las texturas de producto pueden registrarse de forma perezosa la
+		-- primera vez que se solicitan. No convertir un nil transitorio durante
+		-- la construcción del rail en un icono vacío permanente: el renderer
+		-- exacto resuelve el descriptor en cada frame y el escalable reintenta
+		-- hasta recibir la Texture nativa.
+		if not exact and not self.texture then
+			self.texture = SiK.UI.Icon.resolve(item.icon or item.texture)
+		end
+		if exact or self.texture then
 			local tint = resolvedColor(selected and options.selectedIconColor
 				or (hovered and options.hoverIconColor or options.iconColor),
 				selected and "accent" or "text", options.theme)
-			local exact = item.iconExact == true or options.iconExact == true
 			local draw = exact and SiK.UI.Icon.drawExact or SiK.UI.Icon.draw
 			-- The scalable renderer consumes the resolved native Texture. Passing
 			-- the descriptor table reaches ISUIElement:drawTextureScaledAspect and

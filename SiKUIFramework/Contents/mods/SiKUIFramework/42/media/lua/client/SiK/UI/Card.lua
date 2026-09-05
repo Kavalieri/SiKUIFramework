@@ -25,8 +25,8 @@ function Card.metrics(variant)
 			gap = 12, stateDotSize = 7, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "process" then
-		return { minWidth = 260, minHeight = 148, iconSize = 40, padding = 8,
-			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
+		return { minWidth = 260, minHeight = 156, iconSize = 40, padding = 12,
+			gap = 10, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "output" then
 		return { minWidth = 260, minHeight = 216, iconSize = 40, padding = 8,
@@ -97,10 +97,10 @@ function Card.create(options)
 		local actionReserve = instance.actionButton and (metrics.actionHeight + metrics.gap) or 0
 		local bodyTop = metrics.padding + metrics.headerHeight + metrics.gap
 		local bodyHeight = math.max(1, panel.height - bodyTop - metrics.padding - actionReserve)
-		local rowHeight = math.min(bodyHeight, instance.requirementRow.height)
 		instance.requirementRow:setX(metrics.padding)
-		instance.requirementRow:setY(bodyTop + math.max(0, bodyHeight - rowHeight))
 		instance.requirementRow:reflow(math.max(1, panel.width - metrics.padding * 2))
+		local rowHeight = math.min(bodyHeight, instance.requirementRow.height)
+		instance.requirementRow:setY(bodyTop + math.max(0, bodyHeight - rowHeight))
 	end
 
 	function instance:setData(data)
