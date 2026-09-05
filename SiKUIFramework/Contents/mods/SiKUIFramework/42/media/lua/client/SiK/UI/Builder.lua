@@ -847,13 +847,28 @@ local function referencedContext(context, host)
 end
 
 local function buildTabs(handle, node, context, tree)
+	local function destinationKey(field, value)
+		for optionIndex = 1, #(node.options or {}) do
+			local option = node.options[optionIndex]
+			if option[field] == value then
+				return option.id or option.value or tostring(optionIndex)
+			end
+		end
+		return nil
+	end
 	for index = 1, #(node.children or {}) do
 		local child = node.children[index]
 		local host = handle.contentHosts and handle.contentHosts[child.id]
 		if not host then error("SiK UI tab content host unavailable: " .. child.id, 2) end
 		local area = { x = 0, y = 0, w = math.max(1, n(host.width, 1)), h = math.max(1, n(host.height, 1)) }
-		buildNode(host, child, context, tree, area,
-			{ kind = "host", parentId = node.id, host = host, index = index })
+		local childHandle = buildNode(host, child, context, tree, area,
+				{ kind = "host", parentId = node.id, host = host, index = index })
+		local key = destinationKey("contentId", child.id)
+		local panel = childHandle and (childHandle.panel or childHandle.control or childHandle)
+		local mounted, mountReason = handle:mountContent(key, panel)
+		if not mounted then
+			error("SiK UI tab content mount failed: " .. child.id .. ":" .. tostring(mountReason), 2)
+		end
 	end
 	for index = 1, #(node.options or {}) do
 		local option = node.options[index]
@@ -869,6 +884,14 @@ local function buildTabs(handle, node, context, tree)
 			if not valid then error(validationErr, 2) end
 			local childTree, buildErr = Builder.build(host, artifact, referencedContext(context, host))
 			if not childTree then error(buildErr, 2) end
+			local key = destinationKey("surfaceRef", option.surfaceRef)
+			local root = childTree.root
+			local panel = root and (root.panel or root.control or root)
+			local mounted, mountReason = handle:mountContent(key, panel)
+			if not mounted then
+				error("SiK UI tab surface mount failed: " .. option.surfaceRef
+					.. ":" .. tostring(mountReason), 2)
+			end
 			tree.surfaces[option.surfaceRef] = childTree
 			tree.surfaceOrder[#tree.surfaceOrder + 1] = childTree
 		end

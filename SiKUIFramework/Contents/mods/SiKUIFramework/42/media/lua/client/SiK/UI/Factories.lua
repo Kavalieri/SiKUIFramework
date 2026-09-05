@@ -458,6 +458,14 @@ local controlKinds = {
 	["requirement-row"] = "requirementRow",
 }
 
+-- Visual variants may name a canonical presentation without replacing the
+-- semantic control kind. Keep this mapping explicit and closed: consumers can
+-- use the shared capacity meter even when an older generated artifact omitted
+-- the redundant `kind = progress` property.
+local controlVariantKinds = {
+	capacity = "progress",
+}
+
 local function controlPresentation(props)
 	local data = props.data
 	local result = {
@@ -502,7 +510,7 @@ local function controlPresentation(props)
 end
 
 local function controlFactory(parent, props, context)
-        local kind = controlKinds[props.kind] or props.kind
+	local kind = controlKinds[props.kind] or props.kind or controlVariantKinds[props.variant]
         local presentation = controlPresentation(props)
         -- `icon-button` is the compact action primitive.  Its label remains an
         -- accessible tooltip, never visible text competing with the glyph.  A
@@ -547,7 +555,9 @@ local function tabsFactory(parent, props, context)
 	local instance, err = SiK.UI.Navigation.create({ parent = parent,
 		placement = props.placement, items = items, activeKey = props.activeKey,
 		bounds = props.bounds, extent = props.barSize,
-		playerNum = context.playerNum, gap = props.layout and props.layout.gap,
+		playerNum = context.playerNum,
+		contentGap = props.contentGap or (props.layout and props.layout.gap),
+		itemGap = props.itemGap,
 		iconFit = props.iconFit, iconPadding = props.iconPadding,
 		iconOnly = props.iconOnly, tooltipMode = props.tooltipMode,
 		onActivate = function(payload) return emit(props, "change", payload) end,

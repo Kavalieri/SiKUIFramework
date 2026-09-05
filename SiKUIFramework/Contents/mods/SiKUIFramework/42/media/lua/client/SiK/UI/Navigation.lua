@@ -309,7 +309,10 @@ function Navigation.create(options)
 		separatorColor = options.separatorColor,
 		onActivate = function(context)
 			local item = context and context.value
-			if item and item.key then instance.activeKey = item.key end
+			-- Tabs already changed its own selected key before emitting this callback.
+			-- Apply the same destination transition without emitting back into Tabs:
+			-- assigning activeKey alone leaves every mounted content panel visible.
+			if item and item.key then instance:setActive(item.key, false) end
 			if type(options.onActivate) == "function" then return options.onActivate(context) end
 		end })
 	if not instance.tabs then instance:dispose(); return nil, err end
