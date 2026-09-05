@@ -29,8 +29,8 @@ function Card.metrics(variant)
 			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "output" then
-		return { minWidth = 260, minHeight = 200, iconSize = 40, padding = 8,
-			gap = 12, stateDotSize = 6, actionHeight = 32, headerHeight = 24,
+		return { minWidth = 260, minHeight = 216, iconSize = 40, padding = 8,
+			gap = 16, stateDotSize = 6, actionHeight = 32, headerHeight = 24,
 			requirementIconSize = 32 }
 	end
 	if variant == "palette" then

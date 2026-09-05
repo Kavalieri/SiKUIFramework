@@ -296,9 +296,27 @@ local function createInstance(options)
 	viewport.render = function(self)
 		if self.clearStencilRect then self:clearStencilRect() end
 	end
+	local function relayWheelToAncestor(delta)
+		local ancestor = instance.parent and instance.parent.parent or nil
+		while ancestor do
+			local outer = ancestor._sikScrollInstance
+			if outer and outer ~= instance and outer._maxOffset and outer:_maxOffset() > 0 then
+				outer:scrollBy((tonumber(delta) or 0) * outer.wheelStep)
+				return true
+			end
+			ancestor = ancestor.parent
+		end
+		return false
+	end
 	viewport.onMouseWheel = function(_, delta)
-		instance:scrollBy((tonumber(delta) or 0) * instance.wheelStep)
-		return true
+		if instance:_maxOffset() > 0 then
+			instance:scrollBy((tonumber(delta) or 0) * instance.wheelStep)
+			return true
+		end
+		-- PZ does not bubble wheel events from nested ISPanels. A non-scrollable
+		-- table therefore forwards the gesture explicitly to its nearest live
+		-- scroll ancestor, exactly once.
+		return relayWheelToAncestor(delta)
 	end
 	host.onMouseWheel = viewport.onMouseWheel
 	bar.prerender = function(self)

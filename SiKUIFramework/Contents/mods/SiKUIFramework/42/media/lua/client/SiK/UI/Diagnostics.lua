@@ -265,13 +265,15 @@ end
 function Diagnostics.inspectMount(navigation, key)
 	local result = { key = key, ok = false, reason = nil }
 	local host = navigation and navigation.hosts and navigation.hosts[key]
+	local mounted = navigation and navigation.mountedContents
+		and navigation.mountedContents[key] or (host and host.mountedContent or nil)
 	if not host or not host.panel then result.reason = "missing_host"
 	elseif navigation.activeKey ~= key then result.reason = "inactive_destination"
 	elseif not visible(host.panel) then result.reason = "hidden_host"
-	elseif not host.mountedContent then result.reason = "missing_content"
-	elseif not visible(host.mountedContent) then result.reason = "hidden_content"
+	elseif not mounted then result.reason = "missing_content"
+	elseif not visible(mounted) then result.reason = "hidden_content"
 	else
-		local bounds = rect(host.mountedContent)
+		local bounds = rect(mounted)
 		if bounds.w <= 0 or bounds.h <= 0 then result.reason = "empty_geometry"
 		else result.ok = true end
 	end

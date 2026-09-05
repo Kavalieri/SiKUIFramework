@@ -1348,7 +1348,12 @@ function Table.create(options)
 	local blockHeaderSpec, blockHeaderHeight, blockHeaderGap = nil, 0, 0
 	local pagerHeight = options.pagination and math.max(1, numberOr(options.pagination.height, tokens.table.pagerHeight)) or 0
 	options.block = block
+	-- Direct Block ownership is the legacy/convenience mode for a table that is
+	-- the Block's sole content. Declarative Builder callers can explicitly turn
+	-- it off because their resolved rectangle already accounts for siblings.
+	local directBlockRequested = options.directBlock
 	options.directBlock = block.panel == options.parent
+	if directBlockRequested == false then options.directBlock = false end
 	local root, reason = createTableRoot(options)
 	if not root then return nil, reason end
 	local header = createPanel(root.panel)

@@ -129,7 +129,8 @@ function Navigation.create(options)
 			if source.surfaceRef then self.surfaceHosts[source.surfaceRef] = host.panel end
 			self.items[index] = {
 				key = key, text = source.text or source.label or source.labelRef or "",
-				icon = source.icon, iconOnly = source.iconOnly, iconExact = source.iconExact,
+				icon = source.icon, iconSize = source.iconSize,
+				iconOnly = source.iconOnly, iconExact = source.iconExact,
 				tooltip = source.tooltip, badge = source.badge, alert = source.alert,
 				enabled = source.enabled ~= false and source.disabled ~= true,
 				payload = source.payload or source.value,
@@ -167,7 +168,11 @@ function Navigation.create(options)
 		panel.parent = host.panel
 		SiK.UI.Layout.apply(panel, host:contentRect())
 		panel:setVisible(self.activeKey == key)
-		host.mountedContent = panel
+		-- Every destination shares this host. Keep the complete keyed mount map;
+		-- a single `mountedContent` pointer makes diagnostics inspect whichever
+		-- destination happened to mount last and report false `hidden_content`
+		-- failures for every other tab.
+		host.mountedContents = self.mountedContents
 		self.mountedContents[key] = panel
 		if self.activeKey == key and SiK.UI.Diagnostics and SiK.UI.Diagnostics.enabled() then
 			SiK.UI.Diagnostics.inspectMount(self, key)

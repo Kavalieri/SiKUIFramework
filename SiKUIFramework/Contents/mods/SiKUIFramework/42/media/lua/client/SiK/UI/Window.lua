@@ -746,6 +746,10 @@ function Window.apply(panel, options)
 	panel._sikBounds = bounds
 	panel:setX(bounds.x); panel:setY(bounds.y)
 	panel:setWidth(bounds.w); panel:setHeight(bounds.h)
+	-- Window.render owns the one exterior frame and the footer's one interior
+	-- divider.  Disable ISPanel's implicit border so it cannot paint a second
+	-- seam over either edge.
+	panel.drawBorder = false
 	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	local previousPrerender = panel.prerender

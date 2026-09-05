@@ -92,7 +92,10 @@ local function containerFactory(parent, props, context)
 	local options = boundsOptions(parent, props, context)
 	local layout = props.layout or {}
 	options.direction = layout.direction or props.direction or "column"
-	options.padding = layout.padding or props.padding
+	-- A SurfaceRoot is structural: Window owns the single 12 px shell inset and
+	-- the root must not silently add the Block's 8 px content padding.  Ordinary
+	-- containers retain that safe default for local composition.
+	options.padding = props.variant == "surface-root" and 0 or layout.padding or props.padding
 	options.gap = layout.gap or props.gap
 	options.align = layout["align-x"] or layout.align or props.align
 	options.verticalAlign = layout["align-y"] or layout["vertical-align"]
@@ -199,6 +202,10 @@ local function tableFactory(parent, props, context)
 	-- Layout wrappers may sit between both, so resolve the established parent
 	-- chain instead of assuming that the immediate parent is the Block host.
 	options.embedded = isInsideBlockContent(parent)
+	-- Builder has already assigned the table's exact sibling-aware rectangle.
+	-- Even when its immediate parent is the Block panel, the table is not
+	-- necessarily the Block's only child (capacity/search/filters are common).
+	options.directBlock = false
 	-- Runtime adapters are product-owned behaviour injected into the neutral
 	-- Table widget. They may configure row rendering, exact identity,
 	-- expansion and selection, but never replace the declarative parent,
