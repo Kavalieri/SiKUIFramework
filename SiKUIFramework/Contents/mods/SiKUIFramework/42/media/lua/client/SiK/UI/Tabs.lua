@@ -163,9 +163,15 @@ local function decorateTabButton(button, item, placement, options)
 			self.texture = SiK.UI.Icon.resolve(item.icon or item.texture)
 		end
 		if exact or self.texture then
-			local tint = resolvedColor(selected and options.selectedIconColor
-				or (hovered and options.hoverIconColor or options.iconColor),
-				selected and "accent" or "text", options.theme)
+			-- Exact product artwork is already authored in its final colours. A
+			-- semantic multiply tint darkens its halo and transparent edge pixels,
+			-- making a 56x56 source look smaller even though the draw rect is exact.
+			-- Keep source colours unless the consumer explicitly opts into masking.
+			local tintExact = item.tintExact == true or options.tintExact == true
+			local tint = exact and not tintExact and { r = 1, g = 1, b = 1, a = 1 }
+				or resolvedColor(selected and options.selectedIconColor
+					or (hovered and options.hoverIconColor or options.iconColor),
+					selected and "accent" or "text", options.theme)
 			local draw = exact and SiK.UI.Icon.drawExact or SiK.UI.Icon.draw
 			-- The scalable renderer consumes the resolved native Texture. Passing
 			-- the descriptor table reaches ISUIElement:drawTextureScaledAspect and
@@ -178,6 +184,8 @@ local function decorateTabButton(button, item, placement, options)
 				{ alpha = tint.a, r = tint.r, g = tint.g, b = tint.b })
 			self._sikIconDrawn, self._sikIconDrawReason = drawn == true, drawReason
 			self._sikIconDrawWidth, self._sikIconDrawHeight = iconSize, iconSize
+			self._sikIconTintMode = exact and (tintExact and "explicit" or "source")
+				or "semantic"
 		end
 		if selected then
 			local color = resolvedColor(options.selectedBorderColor, "accent", options.theme)

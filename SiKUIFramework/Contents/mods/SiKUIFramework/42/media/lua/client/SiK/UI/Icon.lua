@@ -97,17 +97,18 @@ function Icon.drawExact(target, keyOrTexture, x, y, width, height, options)
 	local texture = Icon.resolve(keyOrTexture)
 	if not texture then return false, "missing_texture" end
 	options = options or {}
-	-- PZ's native drawTexture overload is not stable for mod-owned textures on
-	-- every B42 UI path. drawTextureScaled uses the reliable renderer while the
-	-- strict metadata check above guarantees a 1:1 target (no corrective scale).
-	if target.drawTextureScaled then
-		target:drawTextureScaled(texture, x, y, width, height,
-			tonumber(options.alpha) or 1, tonumber(options.r) or 1,
-			 tonumber(options.g) or 1, tonumber(options.b) or 1)
-	else
+	-- Exact means native: once producer dimensions match the slot, never route
+	-- the asset through a scaling API. This preserves an authored bitmap
+	-- byte-for-pixel. Scaling remains only as a compatibility fallback for a
+	-- target that genuinely lacks the native overload.
+	if target.drawTexture then
 		target:drawTexture(texture, x, y, tonumber(options.alpha) or 1,
 			 tonumber(options.r) or 1, tonumber(options.g) or 1,
 			 tonumber(options.b) or 1)
+	else
+		target:drawTextureScaled(texture, x, y, width, height,
+			tonumber(options.alpha) or 1, tonumber(options.r) or 1,
+			 tonumber(options.g) or 1, tonumber(options.b) or 1)
 	end
 	return true
 end

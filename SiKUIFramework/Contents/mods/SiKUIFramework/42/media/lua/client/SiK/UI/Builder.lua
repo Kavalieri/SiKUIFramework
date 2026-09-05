@@ -852,6 +852,11 @@ local function validateRuntimeCoherence(tree)
 				or not sameNumber(actual.y, expected.y) or not sameNumber(actual.w, expected.w)
 				or not sameNumber(actual.h, expected.h) then
 				return nil, "table_geometry:" .. tostring(record.node.id)
+					.. string.format(":actual=%s,%s,%s,%s:expected=%s,%s,%s,%s",
+						tostring(actual and actual.x), tostring(actual and actual.y),
+						tostring(actual and actual.w), tostring(actual and actual.h),
+						tostring(expected and expected.x), tostring(expected and expected.y),
+						tostring(expected and expected.w), tostring(expected and expected.h))
 			end
 		end
 	end
@@ -1026,9 +1031,12 @@ buildNode = function(parent, node, context, tree, available, placement)
                 tree.adoptionSnapshots[node.id] = { record = temporary,
                         state = captured.state, bounds = handleBounds(handle),
                         actionTarget = handle.actionTarget }
-                local applied, applyErr = applyUpdate(temporary, props, context)
-                if applied then applied, applyErr = applyReflow(temporary, bounds, context) end
-                if applied then applied, applyErr = preserveRecord(temporary, captured.state) end
+		local applied, applyErr = applyUpdate(temporary, props, context)
+		if applied then applied, applyErr = preserveRecord(temporary, captured.state) end
+		-- State restoration may refresh an adopted Table and recompute its
+		-- intrinsic height. Declarative geometry is authoritative, so apply it
+		-- after restoring semantic state.
+		if applied then applied, applyErr = applyReflow(temporary, bounds, context) end
 		if not applied then error("SiK UI adoption failed for " .. node.id .. ": " .. tostring(applyErr), 2) end
 	else
 		handle, factoryErr = factory(parent, props, context, node)
@@ -1125,9 +1133,9 @@ local function updateTree(tree, nextContext)
 				snapshots[index] = captureRecord(record)
 				snapshots[index].bounds = handleBounds(record.handle)
 				if contentChanged then updated, updateReason = applyUpdate(record, props, context) end
+				if updated then updated, updateReason = preserveRecord(record, snapshots[index].state) end
 				if updated then updated, updateReason = applyReflow(record, bounds, context) end
 				if updated then updated, updateReason = applyVisibility(record.handle, props.visible ~= false) end
-				if updated then updated, updateReason = preserveRecord(record, snapshots[index].state) end
 			end
 			if not updated then
 				local rollbackOk, rollbackReason = rollbackRecords(tree, snapshots, previousContext,

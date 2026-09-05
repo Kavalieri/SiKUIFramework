@@ -53,9 +53,11 @@ Metrics.profiles = Metrics.profiles or {
 		window = {
 			preferredWidth = 1600, preferredHeight = 900,
 			minWidth = 720, minHeight = 480,
-                        -- Rail, celda y asset comparten el cuadrado nominal. No se
-                        -- reserva una segunda franja horizontal alrededor del icono.
-                        railWidth = 76, railItemHeight = 76, railIconSize = 76,
+			-- El rail incluye 10 px laterales del consumidor alrededor del
+			-- cuadrado 56x56. La celda y el asset comparten ese cuadrado;
+			-- confundir el ancho total (76) con su altura encoge visualmente
+			-- el icono dentro de una pestaña 56x76.
+			railWidth = 76, railItemHeight = 56, railIconSize = 56,
                         railPadding = 0, railGap = 4, railSlotInset = 0,
 			headerHeight = 52, footerMinimumHeight = 0,
 			footerLines = 1, footerPaddingY = 12, footerLineGap = 0,

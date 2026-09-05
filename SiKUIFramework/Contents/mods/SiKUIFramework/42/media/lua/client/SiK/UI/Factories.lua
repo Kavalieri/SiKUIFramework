@@ -590,7 +590,9 @@ local function tableCapture(handle)
         return { rows = handle.rows, columns = handle.columns,
                 state = handle.captureState and handle:captureState() or nil,
                 onSelect = handle.options and handle.options.onSelect or nil,
-                onRowClick = handle.options and handle.options.onRowClick or nil }
+                onRowClick = handle.options and handle.options.onRowClick or nil,
+		directBlock = handle.root and handle.root.directBlock or false,
+		optionsDirectBlock = handle.options and handle.options.directBlock or false }
 end
 
 local function tableRestore(handle, snapshot)
@@ -603,6 +605,13 @@ local function tableRestore(handle, snapshot)
                 handle.options.onSelect = snapshot.onSelect
                 handle.options.onRowClick = snapshot.onRowClick
         end
+	-- Reflow consumes this marker after restoring the captured rectangle.  An
+	-- adopted table may originally belong directly to a Block, but declarative
+	-- ownership must temporarily detach that geometry without losing it.
+	handle._sikRestoreDirectBlock = {
+		root = snapshot.directBlock == true,
+		options = snapshot.optionsDirectBlock == true,
+	}
         if snapshot.state and handle.restoreState then return handle:restoreState(snapshot.state) end
 	return handle
 end
@@ -632,7 +641,27 @@ local function tableUpdate(handle, props)
 end
 
 local function tableReflow(handle, bounds)
-	return handle:reflow(bounds)
+	-- Builder geometry is final. Table:reflow(table) also applies imperative
+	-- auto-height, which is useful for direct consumers but must not override a
+	-- declarative/adopted rectangle after rows or selection are restored.
+	local restoreDirectBlock = handle._sikRestoreDirectBlock
+	handle._sikRestoreDirectBlock = nil
+	if handle.root then handle.root.directBlock = false end
+	if handle.options then handle.options.directBlock = false end
+	-- Consume Table's public reflow contract while marking this as an exact
+	-- declarative rectangle.  fitRows=false prevents auto-height from replacing
+	-- the Builder-owned height after a row/state refresh.
+	bounds.fitRows = false
+	local result, reason = handle:reflow(bounds)
+	if not result then return nil, reason end
+	if restoreDirectBlock then
+		if handle.root then handle.root.directBlock = restoreDirectBlock.root end
+		if handle.options then handle.options.directBlock = restoreDirectBlock.options end
+		if restoreDirectBlock.root and handle.root and handle.root.syncBlockBounds then
+			handle.root:syncBlockBounds()
+		end
+	end
+	return result
 end
 
 local function scrollCapture(handle)

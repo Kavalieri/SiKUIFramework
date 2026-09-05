@@ -1035,18 +1035,21 @@ function Controls.status(parent, options)
 		panel.text = tostring(options.text or "")
 		panel.tone = tone
 		panel.statusColor = options.color
+		panel.textTone = options.textTone or "text"
+		panel.textColor = options.textColor
 		panel.prerender = function(self)
-			local color = statusColor(self.statusColor or self.tone or tone)
+			local indicatorColor = statusColor(self.statusColor or self.tone or tone)
+			local textColor = statusColor(self.textColor or self.textTone or "text")
 			local dotSize = 6
 			local dotY = math.max(0, math.floor((self.height - dotSize) / 2))
-			self:drawRect(2, dotY, dotSize, dotSize, color.a,
-				color.r, color.g, color.b)
+			self:drawRect(2, dotY, dotSize, dotSize, indicatorColor.a,
+				indicatorColor.r, indicatorColor.g, indicatorColor.b)
 			local text = Controls.truncateText(self.text,
 				math.max(1, self.width - 14), options.font or UIFont.Small)
 			local textY = math.max(0, math.floor((self.height
 				- fontHeight(options.font or UIFont.Small)) / 2))
-			self:drawText(text, 14, textY, color.r, color.g, color.b,
-				color.a, options.font or UIFont.Small)
+			self:drawText(text, 14, textY, textColor.r, textColor.g, textColor.b,
+				textColor.a, options.font or UIFont.Small)
 		end
 		function panel:setStatus(text, nextTone, nextColorValue)
 			self.text = tostring(text or "")
