@@ -19,6 +19,16 @@ local function visible(widget, value)
 	if widget.setVisible then widget:setVisible(value) else widget.visible = value end
 end
 
+local function widgetSize(widget, axis)
+	if not widget then return 0 end
+	local getter = axis == "width" and widget.getWidth or widget.getHeight
+	if type(getter) == "function" then
+		local ok, value = pcall(getter, widget)
+		if ok and tonumber(value) then return tonumber(value) end
+	end
+	return number(widget[axis], 0)
+end
+
 local function childBounds(child, rect)
 	if not child then return end
 	SiK.UI.Layout.apply(child, rect)
@@ -93,7 +103,8 @@ local function drawTabAlert(button, item, options)
 	if type(alert) ~= "table" or alert.visible == false or not (alert.icon or alert.texture) then return end
 	local size = math.max(1, math.floor(number(alert.size, 18)))
 	local margin = math.max(0, number(alert.margin, 3))
-	local x, y = button.width - size - margin, button.height - size - margin
+	local x, y = widgetSize(button, "width") - size - margin,
+		widgetSize(button, "height") - size - margin
 	local color = resolvedColor(alert.color, alert.severity == "danger" and "danger" or "warning", options.theme)
 	if alert.glow ~= false then SiK.UI.Icon.draw(button, alert.icon or alert.texture, x, y, size, size,
 		{ alpha = 0.28, r = color.r, g = color.g, b = color.b }) end
@@ -117,7 +128,8 @@ local function decorateTabButton(button, item, placement, options)
 	button._sikTabPlacement = placement
 	button.texture = SiK.UI.Icon.resolve(item.icon or item.texture)
 	button.iconSize = math.max(1, number(item.iconSize, number(options.iconSize,
-		math.min(button.width, button.height) - number(options.iconPadding, 8))))
+		math.min(widgetSize(button, "width"), widgetSize(button, "height"))
+			- number(options.iconPadding, 8))))
 	button._sikIconOnly = item.iconOnly == true or options.iconOnly == true
 	local baseSetSelected = button.setSelected
 	button.setSelected = function(self, value, emit)
@@ -135,8 +147,9 @@ local function decorateTabButton(button, item, placement, options)
 			or (hovered and number(options.hoverIconScale, 1.08) or 1)
 	local padding = math.max(0, number(options.iconPadding,
 		(placement == "left" or placement == "right") and 0 or 4))
-		local availableW, availableH = math.max(1, self.width - padding * 2),
-			math.max(1, self.height - padding * 2)
+		local width, height = widgetSize(self, "width"), widgetSize(self, "height")
+		local availableW, availableH = math.max(1, width - padding * 2),
+			math.max(1, height - padding * 2)
 		local iconSize = options.iconFit == "fill"
 			and math.min(availableW, availableH)
 			or math.min(self.iconSize * scale, availableW, availableH)
@@ -159,8 +172,8 @@ local function decorateTabButton(button, item, placement, options)
 			-- raises once per frame. Exact rendering still needs the descriptor to
 			-- verify its declared slot before resolving it internally.
 			draw(self, exact and (item.icon or item.texture) or self.texture,
-				math.floor((self.width - iconSize) / 2),
-				math.floor((self.height - iconSize) / 2), iconSize, iconSize,
+				math.floor((width - iconSize) / 2),
+				math.floor((height - iconSize) / 2), iconSize, iconSize,
 				{ alpha = tint.a, r = tint.r, g = tint.g, b = tint.b })
 		end
 		if selected then
@@ -170,22 +183,22 @@ local function decorateTabButton(button, item, placement, options)
 				-- pegado al borde del viewport, x=0 deja medio trazo fuera del clip
 				-- del padre y la iluminacion izquierda desaparece. Mantener el trazo
 				-- completo dentro del slot sin alterar su geometria ni la del icono.
-				self:drawRectBorder(1, 1, math.max(0, self.width - 2),
-					math.max(0, self.height - 2), color.a,
+				self:drawRectBorder(1, 1, math.max(0, width - 2),
+					math.max(0, height - 2), color.a,
 					color.r, color.g, color.b)
 			else
 				local thickness = math.max(1, number(options.accentSize, 3))
 				if self._sikTabPlacement == "bottom" then
-					self:drawRect(0, 0, self.width, thickness, color.a,
+					self:drawRect(0, 0, width, thickness, color.a,
 						color.r, color.g, color.b)
 				elseif self._sikTabPlacement == "left" then
-					self:drawRect(self.width - thickness, 0, thickness, self.height,
+					self:drawRect(width - thickness, 0, thickness, height,
 						color.a, color.r, color.g, color.b)
 				elseif self._sikTabPlacement == "right" then
-					self:drawRect(0, 0, thickness, self.height, color.a,
+					self:drawRect(0, 0, thickness, height, color.a,
 						color.r, color.g, color.b)
 				else
-					self:drawRect(0, self.height - thickness, self.width, thickness,
+					self:drawRect(0, height - thickness, width, thickness,
 						color.a, color.r, color.g, color.b)
 				end
 			end

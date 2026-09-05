@@ -333,10 +333,17 @@ end
 
 function Layout.apply(widget, rect)
 	if not widget or not rect then return nil, "invalid_target" end
-	if widget.setX then widget:setX(rect.x) else widget.x = rect.x end
-	if widget.setY then widget:setY(rect.y) else widget.y = rect.y end
-	if widget.setWidth then widget:setWidth(rect.w) else widget.width = rect.w end
-	if widget.setHeight then widget:setHeight(rect.h) else widget.height = rect.h end
+	-- B42 updates the native ISUIElement rectangle through these setters but it
+	-- does not consistently mirror the values back into the Lua fields. SiK UI
+	-- renderers intentionally use those fields in hot paths, so a widget created
+	-- at 0x0 could remain logically 0x0 even after a valid native reflow. Keep
+	-- both representations in lockstep at the framework boundary.
+	if widget.setX then widget:setX(rect.x) end
+	if widget.setY then widget:setY(rect.y) end
+	if widget.setWidth then widget:setWidth(rect.w) end
+	if widget.setHeight then widget:setHeight(rect.h) end
+	widget.x, widget.y = rect.x, rect.y
+	widget.width, widget.height = rect.w, rect.h
 	return widget
 end
 
@@ -349,10 +356,12 @@ function Column:_set(widget, x, y, width, height)
 		self.position(widget, x, y, width, height)
 		return
 	end
-	if x ~= nil and widget.setX then widget:setX(x) end
-	if y ~= nil and widget.setY then widget:setY(y) end
-	if width ~= nil and widget.setWidth then widget:setWidth(width) end
-	if height ~= nil and widget.setHeight then widget:setHeight(height) end
+	Layout.apply(widget, {
+		x = x ~= nil and x or widget.x or 0,
+		y = y ~= nil and y or widget.y or 0,
+		w = width ~= nil and width or widget.width or 0,
+		h = height ~= nil and height or widget.height or 0,
+	})
 end
 
 function Layout.column(options)

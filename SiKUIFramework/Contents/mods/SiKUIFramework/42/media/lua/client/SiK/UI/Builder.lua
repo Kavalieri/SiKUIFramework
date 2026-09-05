@@ -450,15 +450,20 @@ local function childArea(handle, fallback)
                 return { x = 0, y = 0, w = math.max(1, n(host.width, fallback.w)),
                         h = math.max(1, n(host.height, fallback.h)) }
         end
-        if type(handle.contentRect) == "function" then
-                return handle:contentRect()
+	if type(handle.contentRect) == "function" then
+		local rect = handle:contentRect()
+		if type(rect) == "table" then rect._sikContentAlreadyInset = true end
+		return rect
 	end
 	-- A composed container owns the rectangle available to descendants.
 	-- Block, for example, reserves canonical padding and header/footer space in
 	-- getContentRect(); using its backing panel would paint children over chrome.
 	if type(handle.getContentRect) == "function" then
 		local rect = handle:getContentRect()
-		if type(rect) == "table" then return rect end
+		if type(rect) == "table" then
+			rect._sikContentAlreadyInset = true
+			return rect
+		end
 	end
         if type(host) == "table" then
 		return { x = 0, y = 0, w = math.max(1, n(host.width, fallback.w)),
@@ -493,8 +498,12 @@ local function resolveChildGeometry(node, area, context)
                         verticalAlign = layout["vertical-align"],
                 }
         end
-        return SiK.UI.Container.resolveRects(area, entries, {
-                mode = parentLayout.mode, padding = parentLayout.padding,
+	-- Block/Container content rectangles already exclude their own padding.
+	-- Applying the declarative parent padding again displaced every child by
+	-- another 8 px per edge and made tables end 16 px outside their Block.
+	local padding = area and area._sikContentAlreadyInset and 0 or parentLayout.padding
+	return SiK.UI.Container.resolveRects(area, entries, {
+		mode = parentLayout.mode, padding = padding,
                 gap = parentLayout.gap, columns = parentLayout.columns,
                 justify = parentLayout.justify,
         })
