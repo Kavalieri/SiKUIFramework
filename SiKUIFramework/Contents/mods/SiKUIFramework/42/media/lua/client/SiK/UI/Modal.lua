@@ -274,6 +274,17 @@ end
 
 function Modal.show(panel, focusControl)
 	if not panel or panel._sikDisposed then return nil, "invalid_modal" end
+	-- A modal opened by another modal inherits the visible top layer when the
+	-- consumer did not provide an explicit owner. Product windows that are not
+	-- themselves modals still pass `owner`/`setOwner` explicitly. This makes the
+	-- safe stacking rule the default and prevents a newly opened descendant from
+	-- being hidden when its parent is raised again.
+	if not panel._sikModalOwner then
+		local inheritedOwner = Modal.top(panel.playerNum)
+		if inheritedOwner and inheritedOwner ~= panel then
+			Modal.setOwner(panel, inheritedOwner)
+		end
+	end
 	removeFromStack(panel)
 	local stack = stackFor(panel.playerNum, true)
 	stack[#stack + 1] = panel
@@ -422,6 +433,7 @@ function Modal.confirm(options)
 	end
 	panel = Modal.create({
 		kind = "confirm", title = options.title, playerNum = options.playerNum,
+		owner = options.owner,
 		width = width,
 		height = options.height or (contentHeight + metrics.rowGap * 2 + 52),
 		contentHeight = options.contentHeight or contentHeight,
@@ -560,8 +572,9 @@ function Modal.input(options)
 		end
 		if options.onClose then return options.onClose(context) end
 	end
-        panel = Modal.create({
-                kind = "input", title = options.title, playerNum = options.playerNum,
+	panel = Modal.create({
+		kind = "input", title = options.title, playerNum = options.playerNum,
+		owner = options.owner,
                 width = options.width or Modal.STANDARD_MODAL_W,
                 height = options.height or (modalContentHeight + metrics.rowGap * 2 + 52),
                 contentHeight = options.contentHeight or modalContentHeight,
