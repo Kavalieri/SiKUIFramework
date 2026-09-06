@@ -1,126 +1,72 @@
+![SiK UI Framework](docs/assets/sik-ui-framework-banner.png)
+
 # SiK UI Framework
 
-The public composition hierarchy and Card/Container boundary are documented in
-[`docs/SIK_UI_COMPOSITION_MODEL.md`](docs/SIK_UI_COMPOSITION_MODEL.md).
+A standalone client-side composition and lifecycle framework for Project
+Zomboid Build 42.20+. It gives SiK products and external consumers one typed
+`SiK.UI` namespace for windows, blocks, tables, lists, controls, tabs, input,
+resize and disposal. It contains no Global Storage mechanics or product assets.
 
-SiK UI Framework is a standalone, client-side UI composition framework for
-Project Zomboid. Its only public namespace is `SiK.UI`; it is not a Global
-Storage SiK addon and does not import product mechanics, product assets,
-network commands, persistence, permissions or translations.
+## Install and use
 
-## Status and compatibility
+Subscribe to [Workshop 3794332103](https://steamcommunity.com/sharedfiles/filedetails/?id=3794332103)
+and load `SiKUIFramework` before its consumers. A consuming `mod.info` uses
+`require=SiKUIFramework`; client UI code loads `SiK_UI` and consumes only
+the documented public modules.
 
-The publishable mod ID is `SiKUIFramework`. Kava has fixed the common minimum
-for the framework and every SiK product/addon at Project Zomboid Build 42.20,
-so `mod.info` and its human-readable description both declare 42.20+. This is
-a client Lua framework; it is not a server API. The API remains **preview**
-until the complete integrated candidate receives runtime and QA acceptance.
+Start with the [runtime reference](docs/RUNTIME_REFERENCE.md), [public API](docs/SIK_UI_API.md),
+[component catalog](docs/SIK_UI_COMPONENT_CATALOG.md), [window contract](docs/WINDOW.md)
+and [tabs contract](docs/TABS.md).
 
-The runtime, manifest, validator, generator and editor exist in this tree.
-That does not mean a product surface is migrated, visually equivalent in game,
-or accepted by QA. No `SiK.UI` public contract is stable or QA-ready yet.
+| Version | Mod ID | Workshop ID | Build | Support |
+| --- | --- | --- | --- | --- |
+| 1.0.0 | SiKUIFramework | 3794332103 | 42.20+ | MAINTAINED |
 
-## Start here
+The framework is a required client dependency for current SiK products.
+Compatibility with a consumer is only confirmed when that consumer names and
+tests the dependency; framework availability alone does not certify an
+integration.
 
-1. Declare `SiKUIFramework` as a dependency in the consuming mod:
-
-   ```text
-   require=SiKUIFramework
-   ```
-
-   When the consumer also requires another mod, use the normal comma-separated
-   `mod.info` list, for example `require=SiKUIFramework,GlobalStorageSiK`.
-2. Load `SiK_UI` from client UI code, then use only `SiK.UI` public modules.
-3. Use [the runtime reference](docs/RUNTIME_REFERENCE.md) for exact
-   constructors, events, reflow and disposal requirements.
-4. For a declarative surface, validate first with `SiK.UI.validateSurface` and
-   construct it with `SiK.UI.buildSurface`.
-5. Keep product data, actions, authority, i18n and assets in the consuming
-   product. The framework receives bounded callbacks and descriptors only.
-
-Minimal imperative example:
-
-```lua
-require "SiK_UI"
-
-local window, err = SiK.UI.Window.create({
-    playerNum = 0,
-    profile = "standard",
-    header = { productName = "Example" },
-    footer = { items = { "Example 0.1" }, align = "center" },
-})
-if not window then error(err) end
-
-local button = SiK.UI.Controls.button(window, {
-    x = 8, y = 8, w = 160, h = 30, text = "Close",
-    onClick = function() window:close("example") end,
-})
-window:show()
-```
-
-The consumer owns both instances and must dispose them when its surface ends.
-Do not treat the example as an in-game compatibility test.
-
-The dependency is mandatory, not optional. If the ModID or `SiK.UI` bootstrap
-is missing, the consumer must fail explicitly and stop constructing that
-surface. Do not ship a copied subset, hidden fallback, product namespace alias
-or hand-painted replacement for the missing framework. A product that truly
-supports operation without SiK UI must keep that non-UI path independent; it
-must not pretend that a framework surface was built.
-
-## Documentation map
-
-- [Public API](docs/SIK_UI_API.md): public boundary and error convention.
-- [Runtime reference](docs/RUNTIME_REFERENCE.md): every current public
-  constructor/facility, schema, events, reflow and disposal requirements.
-- [Component catalog](docs/SIK_UI_COMPONENT_CATALOG.md): one canonical tool
-  per presentation responsibility.
-- [Lifecycle and ownership](docs/SIK_UI_LIFECYCLE_AND_OWNERSHIP.md): explicit
-  owner rules, builder tree lifecycle and input scope.
-- [Window](docs/WINDOW.md) and [Tabs](docs/TABS.md): detailed shell/navigation
-  contracts.
-- [Data specification schema](docs/SIK_UI_DATA_SPEC_SCHEMA.md): generated
-  runtime-surface boundary.
-- [Dependency graph](docs/DEPENDENCY_GRAPH.md): standalone ModID, consumer and
-  product-API boundaries.
-- [Migration and deprecation ledger](docs/MIGRATION_AND_DEPRECATION_LEDGER.md):
-  current extraction/migration/removal state.
-- [Refactor procedure](docs/REFACTOR_PROCEDURE.md): inventory, recovery and
-  evidence sequence for consumer migrations.
-- [Debugging](docs/DEBUGGING.md): diagnostics boundary and current gaps.
-
-## Repository layout
-
-- `SiKUIFramework/`: publishable Project Zomboid mod.
-- `catalog/`: preview manifest, schema, validator, generator and editor.
-- `docs/`: public contracts and migration record.
-- `tests/`: local QA/authoring checks. This directory is intentionally ignored
-  and is not distributed in the public repository or Workshop artifact; its
-  results are not game acceptance evidence.
-
-## Policy gaps
-
-`PENDING_KAVA`: this repository currently has no declared license, copyright
-policy, public repository URL, support channel or contribution policy. This README therefore
-does not invent reuse permission, attribution terms, contribution workflow or
-support promises. Those decisions must be supplied by the project owner before
-they can be published.
+Report reproducible defects through the official
+[Global Storage SiK repository](https://github.com/Kavalieri/GlobalStorageSiK/issues).
+Include the consumer Mod ID, versions, game mode, resolution, steps and actual
+result. New consumers should propose the smallest public, data-driven contract
+they need rather than importing internals.
 
 ## Español
 
-SiK UI Framework es un framework independiente de composición de interfaz para
-Project Zomboid, de cliente y reutilizable. Su único espacio público es
-`SiK.UI`; no es un addon de Global Storage SiK ni importa mecánicas, recursos,
-comandos de red, persistencia, permisos o traducciones de productos.
+Framework independiente de cliente para componer y gestionar interfaces en
+Project Zomboid Build 42.20+. Ofrece un único namespace tipado `SiK.UI` para
+ventanas, bloques, tablas, listas, controles, pestañas, input, resize y
+limpieza. No contiene mecánicas ni recursos de Global Storage.
 
-El ModID publicable es `SiKUIFramework`. Kava ha fijado Build 42.20 como
-mínimo común del framework y de todos los productos/addons SiK; `mod.info` y la
-descripción visible declaran por tanto 42.20+. La API continúa en **preview**
-hasta superar la aceptación runtime y QA del candidato integrado; ningún
-componente se declara todavía estable o `QA_READY`.
+Suscríbete al [Workshop 3794332103](https://steamcommunity.com/sharedfiles/filedetails/?id=3794332103)
+y carga `SiKUIFramework` antes de los mods consumidores. Informa fallos
+reproducibles en el repositorio oficial indicando Mod ID consumidor, versiones,
+modo, resolución, pasos y resultado real.
 
-Para empezar: declara la dependencia, carga `SiK_UI` solo desde código visual
-de cliente, consume los módulos `SiK.UI` documentados y conserva datos,
-acciones, autoridad, traducciones y recursos dentro del mod consumidor. La
-referencia técnica en inglés de arriba es la fuente contractual completa; esta
-sección solo resume su alcance.
+## ❤️ Support development
+
+SiK mods remain free. Voluntary support through
+[GitHub Sponsors](https://github.com/sponsors/Kavalieri) does not unlock
+features, exclusive gameplay, priority or guaranteed support.
+
+## ❤️ Apoya el desarrollo
+
+Global Storage SiK y sus addons son gratuitos y seguirán siéndolo. Si quieres
+apoyar su desarrollo, pruebas y mantenimiento, puedes hacerlo mediante
+[GitHub Sponsors](https://github.com/sponsors/Kavalieri).
+
+El apoyo es completamente voluntario y no desbloquea funciones, contenido ni
+ventajas de juego exclusivas.
+
+## Licence and notices
+
+See [LICENSE.md](LICENSE.md), [NOTICE.md](NOTICE.md),
+[CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md),
+[MAINTENANCE_STATUS.md](MAINTENANCE_STATUS.md) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+This project uses AI assistance, including Codex and Claude, during parts of
+design, documentation and development. Product decisions, review and
+publication remain with the SiK team.

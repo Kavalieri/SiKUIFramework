@@ -3,7 +3,7 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
-## Unreleased
+## 1.0.0 — 2026-09-06
 
 - Rebuilt the public documentation from the current standalone runtime rather
   than from the catalog alone.
@@ -14,18 +14,7 @@ consumer surface.
   are built through `SiK.UI.Builder`/`SiK.UI.Factories`.
 - Aligned framework and ecosystem metadata to the owner-approved common
   compatibility floor: Project Zomboid Build 42.20+.
-- Recorded the absence of a published license/contribution policy without
-  inventing owner decisions.
-- Kept every public contract in preview. This entry does not declare stability,
-  product migration, HTML-to-Lua parity or QA readiness.
-
-## 1.0.0-dev1
-
-- Created the independent `SiKUIFramework` repository and publishable mod
-  scaffold.
-- Added the `SiK.UI` client runtime module set, preview manifest/schema,
-  staged validator, deterministic generator and data-first editor.
-- Added generated data-only runtime-surface artifacts with provenance fields.
-
-This development entry does not declare any product UI visually equivalent or
-accepted in game.
+- Published the source-available licence, contribution, security, maintenance
+  and third-party notice set approved for the public repository.
+- Published the first complete source-available framework contract. Individual
+  product integrations remain subject to their own runtime compatibility.
