@@ -140,10 +140,13 @@ if panel then panel:show() end
 ```
 
 Use `Modal.create` when the Window must participate in the per-player modal
-stack, then call `Modal.show(panel[, focusControl])`. Pass `owner = window` to
-keep the modal above that window only; this is scoped ordering, not global
-always-on-top. `Modal.raiseOwner(window)` raises the owner and its visible modal
-children in order, while `Modal.topForOwner(window)` is a read-only lookup.
+stack. Root modals call `Modal.show(panel[, focusControl])`; descendants call
+`Modal.presentChild(owner, panel[, focusControl])` as one atomic ownership and
+presentation operation. While a descendant lives it alone owns native
+always-on-top priority, its owner cannot capture pointer input, and closing,
+saving, cancelling or Escape disposal restores the owner layer and focus.
+`Modal.raiseOwner(window)` raises the visible owned chain, while
+`Modal.topForOwner(window)` is a read-only lookup.
 Modals are fixed-size by default, including `kind = "task"`; adaptive surfaces
 must opt in explicitly with `resizable = true`. `Modal.confirm(options)`,
 `Modal.input(options)`, `Modal.compact` and `Modal.task` are convenience
@@ -243,7 +246,12 @@ pagination = {
     pageSize = 15,
     external = true,
     stateOf = function(parent, parentKey, tableView)
-        return { total = parent.childCount, page = parent.loadedPage, pageSize = 15 }
+        return {
+            totalRows = parent.renderedChildCount,
+            totalUnits = parent.physicalUnitCount,
+            page = parent.loadedPage,
+            pageSize = 15,
+        }
     end,
     onPageChange = function(context)
         -- Request context.page for context.parentKey, then update the Table.
@@ -254,8 +262,10 @@ pagination = {
 
 Both functions are required when `external=true`, otherwise construction fails
 with `invalid_external_pagination`. `expansion.childrenOf(parent)` returns the
-currently loaded physical child page; `stateOf` supplies its logical `total`,
-`page` and `pageSize`. `setChildPage(parentKey, page)` calls `onPageChange` and
+currently loaded child page; `stateOf` supplies logical `totalRows`, semantic
+`totalUnits`, `page` and `pageSize`. The parent/header is excluded from both
+totals. Legacy `total` is accepted only as an alias of `totalRows`; it must
+never carry a physical-unit count. `setChildPage(parentKey, page)` calls `onPageChange` and
 does not mutate or replace source rows. After the request completes, the
 consumer updates its child data and calls `setRows` or updates the owning
 surface. `expansion.hasChildren` can keep the expand affordance available
@@ -475,7 +485,7 @@ release may deprecate them explicitly, but they are not silently internal here.
 | Visual module | Public exports | Preferred use and ownership |
 |---|---|---|
 | `Window` | `Window.derive`, `Window.callBase`, `Window.profile`, `Window.resolveBounds`, `Window.updateConstraints`, `Window.safeRect`, `Window.resizeHandleRect`, `Window.hitTestResizeHandle`, `Window.forgetGeometry`, `Window.chromeRects`, `Window.composeHeaderTitle`, `Window.render`, `Window.reflow`, `Window.apply`, `Window.create`, `Window.newInstance`, `Window.applyEditor` | `create`/`apply` are canonical. Geometry and title-composition helpers return values only. `render` and static `reflow` are advanced hooks for an applied Window; they do not create a second owner. Invalid panels/methods return a stable reason where applicable. |
-| `Modal` | `Modal.top`, `Modal.topForOwner`, `Modal.setOwner`, `Modal.raiseOwned`, `Modal.raiseOwner`, `Modal.resolve`, `Modal.apply`, `Modal.create`, `Modal.show`, `Modal.close`, `Modal.fitContent`, `Modal.confirm`, `Modal.input`, `Modal.compact`, `Modal.task` | `top` lookups are read-only; `resolve` returns bounds/profile data; `create`/conveniences return Window-backed owned panels. `owner` provides scoped owner-before-modal ordering without global always-on-top. Modals resize only by explicit opt-in. `show` registers modal focus; close/dispose removes stack and owner bindings. |
+| `Modal` | `Modal.top`, `Modal.topForOwner`, `Modal.setOwner`, `Modal.raiseOwned`, `Modal.raiseOwner`, `Modal.resolve`, `Modal.apply`, `Modal.create`, `Modal.show`, `Modal.presentChild`, `Modal.close`, `Modal.fitContent`, `Modal.confirm`, `Modal.input`, `Modal.compact`, `Modal.task` | `top` lookups are read-only; `resolve` returns bounds/profile data; `create`/conveniences return Window-backed owned panels. `presentChild` is the canonical atomic descendant path: it binds the owner, blocks owner input, grants native top priority only to the descendant and restores the owner on every disposal route. Modals resize only by explicit opt-in. Root `show` registers modal focus; close/dispose removes stack and owner bindings. |
 | `Container` | `Container.create`, `Container.resolveRects` | `create` is the recursive composition primitive and owns optional navigation plus one common content host. A created container exposes `getContentHost(key)`, `ensureContentHost(key)`, `mountContent(key, panel)`, `setActive(key, emit)`, `setNavigationVisible(visible)` and `getContentBounds(fallback)` so consumers never read or mutate its navigation implementation; tab keys resolve to the same host and only select its mounted child surface. The latter always returns a detached finite numeric rectangle. `resolveRects` is the shared pure geometry resolver used by direct and declarative construction. |
 | `Block` | `Block.resolveContentRect`, `Block.resolveScrollBarRect`, `Block.resolveViewportRect`, `Block.resolveLayout`, `Block.intrinsicHeight`, `Block.contentOwner`, `Block.bindScrollable`, `Block.create` | Resolve and intrinsic-height helpers are pure. `contentOwner` resolves physical Block ancestry. `bindScrollable` returns a disposable geometry binding. `create` owns its panel/listeners and an explicitly adopted scroll. |
 | `Scroll` | `Scroll.rowPoolSizeForViewport`, `Scroll.create`, `Scroll.childHost`, `Scroll.contentRect`, `Scroll.contentWidth`, `Scroll.setContentHeight`, `Scroll.finish`, `Scroll.getScrollOffset`, `Scroll.setScrollOffset`, `Scroll.resetPosition`, `Scroll.applyPanelOffset`, `Scroll.applyWheelDelta`, `Scroll.resize`, `Scroll.setOnContentRectChanged`, `Scroll.addChild`, `Scroll.disposeChild`, `Scroll.isLiveWidget`, `Scroll.forEachChild`, `Scroll.childCount`, `Scroll.clearTagged`, `Scroll.clear`, `Scroll.setContentX`, `Scroll.setContentY`, `Scroll.bindScrollEvents`, `Scroll.ensureScrollBars`, `Scroll.setScrollBarsVisible`, `Scroll.isScrollBarWidget`, `Scroll.syncTree`, `Scroll.contentBottomInset`, `Scroll.viewportBottomGap`, `Scroll.listBottomGap`, `Scroll.bottomPad` | `create(options[, x,y,w,h])` is canonical and owns viewport/host/bar/listeners. The positional tail is a preview compatibility form. Child/tree/bar helpers operate only on the supplied Scroll and do not transfer ownership unless `addChild`/`disposeChild` is explicitly used. `bindScrollEvents` and geometry callbacks must be cleared by the Scroll owner or disposal. |

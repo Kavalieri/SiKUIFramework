@@ -754,12 +754,19 @@ function TableInstance:_projectParent(parent, out)
 	if self.pagination and self.pagination.external then
 		externalState = self.pagination.stateOf(parent.item, parent.key, self)
 		if type(externalState) == "table" then
-			total = math.max(0, math.floor(numberOr(externalState.total, total)))
+			-- External hierarchical sources distinguish rendered child rows from
+			-- physical units.  Pagination owns rows only; the parent/header is never
+			-- part of either count. `total` remains a compatibility alias for rows.
+			total = math.max(0, math.floor(numberOr(
+				externalState.totalRows, numberOr(externalState.total, total))))
 			requestedPage = numberOr(externalState.page, requestedPage)
 			size = math.max(1, math.floor(numberOr(externalState.pageSize, size)))
 		end
 	end
 	local state = pageState(total, requestedPage, size)
+	state.totalRows = total
+	state.totalUnits = type(externalState) == "table"
+		and math.max(0, math.floor(numberOr(externalState.totalUnits, total))) or total
 	state.disabled = type(externalState) == "table" and externalState.disabled == true or false
 	state.disabledReason = type(externalState) == "table" and externalState.disabledReason or nil
 	self.childPages[parent.key] = state.page
