@@ -117,6 +117,7 @@ local function bindOwner(panel, owner)
 			owner = owner,
 			children = {},
 			wasAlwaysOnTop = owner.isAlwaysOnTop and owner:isAlwaysOnTop() or false,
+			ownerBringToTop = owner.bringToTop,
 		}
 		ownerBindings[owner] = binding
 		-- Only the visible descendant keeps native always-on-top priority.  The
@@ -124,6 +125,20 @@ local function bindOwner(panel, owner)
 		-- the last child closes.
 		if owner.setAlwaysOnTop then owner:setAlwaysOnTop(false) end
 		binding.blocker = createOwnerBlocker(owner)
+		-- Any native/UI activation of the owner must finish by restoring the
+		-- complete owner -> blocker -> child order.  Scope the wrapper to the
+		-- lifetime of the binding and restore the exact method afterwards.
+		if binding.ownerBringToTop then
+			owner.bringToTop = function(self, ...)
+				local current = ownerBindings[self]
+				local original = current and current.ownerBringToTop or binding.ownerBringToTop
+				if original then original(self, ...) end
+				if current and current.blocker and current.blocker.bringToTop then
+					current.blocker:bringToTop()
+				end
+				Modal.raiseOwned(self)
+			end
+		end
 	end
 	for index = 1, #binding.children do
 		if binding.children[index] == panel then return true end
@@ -144,6 +159,7 @@ unbindOwner = function(panel)
 	if #binding.children == 0 then
 		disposeOwnerBlocker(binding)
 		if owner.setAlwaysOnTop then owner:setAlwaysOnTop(binding.wasAlwaysOnTop == true) end
+		if binding.ownerBringToTop then owner.bringToTop = binding.ownerBringToTop end
 		ownerBindings[owner] = nil
 	end
 	panel._sikModalOwner = nil
@@ -161,6 +177,7 @@ function Modal.raiseOwner(owner)
 	if not owner then return false end
 	local binding = ownerBindings[owner]
 	if binding then
+		if owner.bringToTop then owner:bringToTop(); return true end
 		if binding.blocker and binding.blocker.bringToTop then binding.blocker:bringToTop() end
 		return Modal.raiseOwned(owner)
 	end
