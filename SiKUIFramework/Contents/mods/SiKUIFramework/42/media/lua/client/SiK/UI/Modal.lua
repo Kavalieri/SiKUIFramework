@@ -399,36 +399,49 @@ function Modal.close(panel, reason)
 end
 
 function Modal.fitContent(panel, contentHeight, options)
-	if not panel or panel._sikDisposed then return nil, "invalid_modal" end
-	options = options or {}
-	contentHeight = math.max(0, tonumber(contentHeight) or 0)
-	if panel.contentBlock and panel.contentBlock.setContentHeight then
-		panel.contentBlock:setContentHeight(contentHeight)
-	end
-	local desired
-	if options.contentBottom == true then
-		desired = contentHeight + math.max(0, tonumber(options.bottomPadding) or 0)
-	else
-		desired = (panel.headerHeight or 0) + (panel.footerHeight or 0)
-			+ (panel.windowPadding or 0) * 2 + contentHeight
-	end
-	if options.center == true then
-		local bounds = SiK.UI.Window.resolveBounds({
-			playerNum = panel.playerNum,
-			profile = panel._sikWindowOptions and panel._sikWindowOptions.profile,
-			width = panel.width, height = desired,
-			environment = options.environment,
-		})
-		panel:setX(bounds.x); panel:setY(bounds.y)
-		panel:setSize(bounds.w, bounds.h)
-	else
-		SiK.UI.Window.updateConstraints(panel, {
-			width = panel.width, height = desired,
-			environment = options.environment,
-		})
-	end
-	panel:reflow()
-	return panel
+        if not panel or panel._sikDisposed then return nil, "invalid_modal" end
+        options = options or {}
+        contentHeight = math.max(0, tonumber(contentHeight) or 0)
+        local function desiredHeight(value)
+                if options.contentBottom == true then
+                        return value + math.max(0, tonumber(options.bottomPadding) or 0)
+                end
+                return (panel.headerHeight or 0) + (panel.footerHeight or 0)
+                        + (panel.windowPadding or 0) * 2 + value
+        end
+        local function applyHeight(value)
+                if panel.contentBlock and panel.contentBlock.setContentHeight then
+                        panel.contentBlock:setContentHeight(value)
+                end
+                local desired = desiredHeight(value)
+                if options.center == true then
+                        local bounds = SiK.UI.Window.resolveBounds({
+                                playerNum = panel.playerNum,
+                                profile = panel._sikWindowOptions and panel._sikWindowOptions.profile,
+                                width = panel.width, height = desired,
+                                environment = options.environment,
+                        })
+                        panel:setX(bounds.x); panel:setY(bounds.y)
+                        panel:setSize(bounds.w, bounds.h)
+                else
+                        SiK.UI.Window.updateConstraints(panel, {
+                                width = panel.width, height = desired,
+                                environment = options.environment,
+                        })
+                end
+                panel:reflow()
+                return desired
+        end
+        -- A wrapped dialogue can gain or lose a scrollbar after Window clamps it to
+        -- the viewport. Re-read its measured content and settle only the Window
+        -- height; the dock remains the sole owner of overflow and its inset.
+        for pass = 1, 3 do
+                applyHeight(contentHeight)
+                local measured = tonumber(panel._sikDialogueHeight)
+                if not measured or math.abs(measured - contentHeight) < 1 then break end
+                contentHeight = math.max(0, measured)
+        end
+        return panel
 end
 
 local function translated(key, fallback)

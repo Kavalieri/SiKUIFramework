@@ -523,6 +523,7 @@ end
 function TableInstance:_drawRow(panel)
 	local projected = panel._sikProjected
 	if not projected then return end
+	if projected.kind == "pager" then return self:_drawChildPager(panel, projected) end
 	local descriptor = panel._sikDescriptor
 	local hovered = panel.isMouseOver and panel:isMouseOver() or false
 	-- Every row owns a complete SiK surface.  Leaving odd rows transparent made
@@ -599,6 +600,37 @@ function TableInstance:_drawRow(panel)
 				value.color or column.spec.color or self.colors.text)
 		end
 		self:_layoutCellActions(panel, column, rect, projected)
+	end
+end
+
+-- The inline pager is projected as a structural row below its own expanded
+-- parent.  It deliberately has no semantic selection, descriptor, cell action
+-- or product row callback: pagination is navigation, never data.
+function TableInstance:_drawChildPager(panel, projected)
+	local state = projected.pageState
+	if not state then return end
+	local background = self.colors.tableRowChild or self.colors.tableRow
+	if background and panel.drawRect then
+		local r, g, b, a = colorParts(background, self.colors.tableRow)
+		panel:drawRect(0, 0, panel.width, panel.height, a, r, g, b)
+	end
+	if panel.drawRect then
+		local r, g, b, a = colorParts(self.colors.tableRowDivider, self.colors.divider)
+		panel:drawRect(0, math.max(0, panel.height - 1), panel.width, 1, a, r, g, b)
+	end
+	local y = math.max(0, math.floor((panel.height - self.metrics.fontHeight) / 2))
+	local r, g, b, a = colorParts(self.colors.textMuted, self.colors.text)
+	local enabled = not state.disabled
+	local labelWidth = math.max(0, panel.width - self.pagerButtonWidth * 2 - 12)
+	if panel.drawText then
+		panel:drawText(truncate(self.metrics.font, projected.pagerLabel or "", labelWidth), 8, y,
+			r, g, b, enabled and a or a * 0.35, self.metrics.font)
+		panel:drawText("<", panel.width - self.pagerButtonWidth * 2, y, r, g, b,
+			state.hasPrevious and enabled and a or a * 0.35, self.metrics.font)
+	end
+	if panel.drawTextRight then
+		panel:drawTextRight(">", panel.width - 4, y, r, g, b,
+			state.hasNext and enabled and a or a * 0.35, self.metrics.font)
 	end
 end
 
@@ -767,8 +799,13 @@ function TableInstance:_projectParent(parent, out)
 	state.totalRows = total
 	state.totalUnits = type(externalState) == "table"
 		and math.max(0, math.floor(numberOr(externalState.totalUnits, total))) or total
+	state.pending = type(externalState) == "table" and externalState.pending == true or false
+	state.stale = type(externalState) == "table" and externalState.stale == true or false
 	state.disabled = type(externalState) == "table" and externalState.disabled == true or false
+	state.disabled = state.disabled or state.pending or state.stale
 	state.disabledReason = type(externalState) == "table" and externalState.disabledReason or nil
+	if state.pending then state.disabledReason = "page_pending"
+	elseif state.stale then state.disabledReason = "page_stale" end
 	self.childPages[parent.key] = state.page
 	self.childPageStates[parent.key] = state
 	-- The pager belongs to the expanded hierarchy currently being inspected.
@@ -789,6 +826,20 @@ function TableInstance:_projectParent(parent, out)
 			visualKey = selection.id, semantic = selection, parentKey = parent.key,
 			sourceIndex = childIndex, hasChildren = false }
 	end
+	local label = nil
+	if self.pagination and type(self.pagination.labelOf) == "function" then
+		label = self.pagination.labelOf(state, parent.item, parent.key, self)
+	end
+	-- Keep the fallback language-neutral. Product localizers own the approved
+	-- sentence, including plural forms and locale-specific unit labels.
+	if type(label) ~= "string" or label == "" then
+		label = tostring(state.first) .. "-" .. tostring(state.last) .. " / "
+			.. tostring(state.totalRows) .. " \183 " .. tostring(state.totalUnits)
+	end
+	out[#out + 1] = { kind = "pager", data = nil, depth = 1,
+		key = "pager:" .. tostring(parent.key), visualKey = "pager:" .. tostring(parent.key),
+		parentKey = parent.key, sourceIndex = 0, hasChildren = false,
+		pageState = state, pagerLabel = label }
 end
 
 function TableInstance:_projectRows()
@@ -835,7 +886,8 @@ function TableInstance:_createRow(_, width, height)
 		if owner and not owner.disposed then
 			owner:_drawRow(panel)
 			local adapter = owner.rowAdapter
-			if adapter and adapter.afterRender then
+			if panel._sikProjected and panel._sikProjected.kind ~= "pager"
+					and adapter and adapter.afterRender then
 				adapter.afterRender(owner:_rowContext(panel))
 			end
 		end
@@ -843,7 +895,8 @@ function TableInstance:_createRow(_, width, height)
 	row.dispose = function(panel)
 		local owner = panel._sikTable
 		if owner then
-			if owner.rowAdapter and owner.rowAdapter.dispose then
+			if panel._sikProjected and panel._sikProjected.kind ~= "pager"
+					and owner.rowAdapter and owner.rowAdapter.dispose then
 				owner.rowAdapter.dispose(owner:_rowContext(panel))
 			end
 			owner:_disposeCellActions(panel)
@@ -878,7 +931,12 @@ end
 
 function TableInstance:_updateRow(row, projected, index)
 	row._sikProjected, row._sikDataIndex, row._sikTable = projected, index, self
-	row._sikSelected = self.semanticSelections[projected.semantic.id] == true
+	row._sikSelected = projected.semantic and self.semanticSelections[projected.semantic.id] == true or false
+	if projected.kind == "pager" then
+		self:_disposeCellActions(row)
+		row._sikDescriptor = nil
+		return
+	end
 	self:_syncCellActions(row, projected)
 	if self.rowAdapter and self.rowAdapter.update then
 		self.rowAdapter.update(self:_rowContext(row))
@@ -1420,7 +1478,9 @@ function Table.create(options)
 	if not root then return nil, reason end
 	local header = createPanel(root.panel)
 	local blockHeader = blockHeaderSpec and SiK.UI.Controls.blockHeader(root.panel, blockHeaderSpec) or nil
-	local pager = options.pagination and createPanel(root.panel) or nil
+	-- Hierarchical pagination is a row belonging to the expanded parent; retain
+	-- the legacy footer pager only for a flat table.
+	local pager = options.pagination and not options.expansion and createPanel(root.panel) or nil
 	local emptyPanel = options.emptyText and createPanel(root.panel) or nil
 	local scroll, scrollReason = SiK.UI.Scroll.create({ parent = root.panel,
 		viewportRect = root:getContentRect(), trackRect = root:getTrackRect(), wheelStep = options.wheelStep,
@@ -1473,7 +1533,9 @@ function Table.create(options)
 			external = options.pagination.external == true,
 			stateOf = options.pagination.stateOf,
 			onPageChange = options.pagination.onPageChange,
+			labelOf = options.pagination.labelOf,
 		} or nil,
+		pagerButtonWidth = math.max(12, numberOr(options.pagerButtonWidth, 24)),
 		page = 1, pageState = nil, options = options, colors = SiK.UI.Theme.tokens(options.theme),
 		paddingX = paddingX, paddingY = paddingY,
 		sortKey = options.sortKey, sortAsc = options.sortAsc ~= false,
@@ -1541,6 +1603,10 @@ function Table.create(options)
 		end,
 		interaction = {
 			onMouseDown = function(context)
+				if context.item.kind == "pager" then
+					if context.row.setCapture then context.row:setCapture(true) end
+					return true
+				end
 				if instance:_isExpansionHit(context.row, context.x) then
 					context.row._sikExpansionPressed = true
 					if context.row.setCapture then context.row:setCapture(true) end
@@ -1552,12 +1618,26 @@ function Table.create(options)
 				return adapter.onMouseDown(rowContext) == true
 			end,
 			onMouseMove = function(context)
+				if context.item.kind == "pager" then return true end
 				if context.row._sikExpansionPressed then return true end
 				local adapter = instance.rowAdapter
 				if not adapter or not adapter.onMouseMove then return false end
 				return adapter.onMouseMove(instance:_rowContext(context.row, context)) == true
 			end,
 			onMouseUp = function(context)
+				if context.item.kind == "pager" then
+					if context.row.setCapture then context.row:setCapture(false) end
+					local state = context.item.pageState
+					if not state or state.disabled then return true end
+					local previousStart = context.row.width - instance.pagerButtonWidth * 2
+					local nextStart = context.row.width - instance.pagerButtonWidth
+					if context.x >= previousStart and context.x < nextStart and state.hasPrevious then
+						instance:setChildPage(context.item.parentKey, state.page - 1)
+					elseif context.x >= nextStart and state.hasNext then
+						instance:setChildPage(context.item.parentKey, state.page + 1)
+					end
+					return true
+				end
 				if context.row._sikExpansionPressed then
 					context.row._sikExpansionPressed = nil
 					if context.row.setCapture then context.row:setCapture(false) end
@@ -1568,6 +1648,10 @@ function Table.create(options)
 				return adapter.onMouseUp(instance:_rowContext(context.row, context)) == true
 			end,
 			onMouseUpOutside = function(context)
+				if context.item.kind == "pager" then
+					if context.row.setCapture then context.row:setCapture(false) end
+					return true
+				end
 				if context.row._sikExpansionPressed then
 					context.row._sikExpansionPressed = nil
 					if context.row.setCapture then context.row:setCapture(false) end
@@ -1578,11 +1662,13 @@ function Table.create(options)
 				return adapter.onMouseUpOutside(instance:_rowContext(context.row, context)) == true
 			end,
 			onDoubleClick = function(context)
+				if context.item.kind == "pager" then return true end
 				local adapter = instance.rowAdapter
 				if not adapter or not adapter.onDoubleClick then return false end
 				return adapter.onDoubleClick(instance:_rowContext(context.row, context)) == true
 			end,
 			onRightClick = function(context)
+				if context.item.kind == "pager" then return true end
 				local adapter = instance.rowAdapter
 				if not adapter or not adapter.onRightClick then return false end
 				return adapter.onRightClick(instance:_rowContext(context.row, context)) == true

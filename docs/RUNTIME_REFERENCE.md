@@ -344,7 +344,7 @@ the control itself.
 | `button` | `text`, optional `locked`, `fullWidth` | `onClick` | `setEnabled`, `setLocked`, `setText` | `Controls.button(host, { text = "OK" })` |
 | `iconButton` | `icon`/`texture`, optional `iconSize` | `onClick` | `getTexture`, `setTexture` | `Controls.iconButton(host, { icon = "close" })` |
 | `icon` | passive `icon`/`texture`, optional `iconSize`/`tone` | none | `getTexture`, `setTexture`, `setTone`, `reflow` | `Controls.icon(host, { icon = "info" })` |
-| `field` | `placeholder`, `numeric`, `maxLength` | `onChange` | `setEnabled` | `Controls.field(host, { placeholder = "Name" })` |
+| `field` | `placeholder`, `numeric`, `maxLength`, `textInset` | `onChange` | `setEnabled`, `getText`, `setText` | `Controls.field(host, { placeholder = "Name", textInset = 8 })` |
 | `combo` | `items`/`options`, optional numeric `selected` | `onChange` | `setEnabled` | `Controls.combo(host, { items = { "A" } })` |
 | `search` | field text and optional search action | `onChange`, `onSubmit` | composite control bounds by consumer | `Controls.search(host, { onSubmit = find })` |
 | `toggle` | boolean `selected` | `onChange` | `setSelected` | `Controls.toggle(host, { selected = true })` |
@@ -358,6 +358,11 @@ the control itself.
 | `blockHeader` | same schema as `sectionTitle` | same callbacks | same fitted-title methods | `Controls.blockHeader(host, { text = "Section" })` |
 | `listOption` | `text`, selection/activation state | `onClick` | `setSelected`, `setText`, `reflow` | `Controls.listOption(host, { text = "Option" })` |
 | `requirementRow` | `text`, `state`/`met`, optional `icon`/texture | none | `setData`, `setState`, `reflow` | `Controls.requirementRow(host, { text = "Need item", met = false })` |
+
+`field.textInset` reserves the same horizontal distance on the left and right of
+the native text rectangle (default: `Controls.metrics(profile).controlGap`).
+The field container owns its chrome; the unmodified `ISTextEntryBox` child owns
+text, placeholder, caret and selection, so all four share that exact rectangle.
 
 `panel` is a general-purpose visual container. It is transparent unless the
 consumer explicitly enables and supplies its chrome. `separator` is the

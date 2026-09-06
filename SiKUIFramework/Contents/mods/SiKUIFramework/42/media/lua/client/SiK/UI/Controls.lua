@@ -685,51 +685,140 @@ function Controls.icon(parent, options)
 end
 
 function Controls.field(parent, options)
-	parent, options = controlArgs(parent, options)
-	local entry = ISTextEntryBox:new(tostring(options.text or ""), n(options.x, 0),
-		n(options.y, 0), math.max(1, n(options.w or options.width, 160)),
-		math.max(1, n(options.h or options.height, Controls.metrics(options.profile).inputHeight)))
-	entry:initialise()
+        parent, options = controlArgs(parent, options)
+        local metrics = Controls.metrics(options.profile)
+        local inset = math.max(0, math.floor(n(options.textInset or options.contentInset,
+                metrics.controlGap)))
+        local field = ISPanel:new(n(options.x, 0), n(options.y, 0),
+                math.max(1, n(options.w or options.width, 160)),
+                math.max(1, n(options.h or options.height, metrics.inputHeight)))
+        field:initialise(); field.drawBackground = false
+        field._sikTextInset = inset
+        field._sikUiControl = "field"
+        local entry = ISTextEntryBox:new(tostring(options.text or ""), inset, 0,
+                math.max(1, field.width - inset * 2), field.height)
+        entry:initialise()
 	-- ISTextEntryBox:setEditable delegates to its Java text box.  Project
 	-- Zomboid only creates that object from instantiate(), not initialise().
 	-- Controls.field applies its initial enabled state before it is attached, so
 	-- the framework must complete the vanilla lifecycle here.
 	if entry.instantiate then entry:instantiate() end
-	local basePrerender = entry.prerender
-	entry.prerender = function(self)
-		local theme = SiK.UI.Theme.tokens(options.theme)
-		local fill = options.enabled == false and theme.background or theme.surface
-		self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
-		self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
-			theme.border.r, theme.border.g, theme.border.b)
-		-- ISTextEntryBox remains only the keyboard/text backend. Its visible
-		-- background and border are suppressed; SiK owns the final chrome.
-		self.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-		self.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-		self.textColor = { r = theme.text.r, g = theme.text.g,
+        field.prerender = function(self)
+                local theme = SiK.UI.Theme.tokens(options.theme)
+                local fill = options.enabled == false and theme.background or theme.surface
+                self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
+                self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
+                        theme.border.r, theme.border.g, theme.border.b)
+                ISPanel.prerender(self)
+        end
+        local basePrerender = entry.prerender
+        entry.prerender = function(self)
+                -- ISTextEntryBox remains only the keyboard/text backend. Its visible
+                -- background and border are suppressed; the field owns the final chrome.
+                -- The native text rectangle is already inset before this runs, so its
+                -- placeholder, caret and selection all use the same symmetric bounds.
+                local theme = SiK.UI.Theme.tokens(options.theme)
+                self.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+                self.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+                self.textColor = { r = theme.text.r, g = theme.text.g,
 			b = theme.text.b, a = theme.text.a }
 		if type(basePrerender) == "function" then return basePrerender(self) end
 	end
-	if options.numeric and entry.setOnlyNumbers then entry:setOnlyNumbers(true) end
-	if options.maxLength and entry.setMaxTextLength then entry:setMaxTextLength(options.maxLength) end
+        if options.numeric and entry.setOnlyNumbers then entry:setOnlyNumbers(true) end
+        if options.maxLength and entry.setMaxTextLength then entry:setMaxTextLength(options.maxLength) end
 	if options.placeholder and entry.setPlaceholderText then
 		entry:setPlaceholderText(tostring(options.placeholder))
 	end
-	entry.onTextChange = function(self)
-		callback(self, options, "onChange", self.getText and self:getText() or self.text)
-	end
-	entry.onPressEnter = function(self)
-		if options.enabled == false then return false end
-		return callback(self, options, "onSubmit", self.getText and self:getText() or self.text)
-	end
-	decorate(entry, "field", options)
-	function entry:setEnabled(value)
-		options.enabled = value ~= false
-		if self.setEditable then self:setEditable(options.enabled) end
-		return self
-	end
-	entry:setEnabled(options.enabled ~= false)
-	return attach(parent, entry)
+        function field:getText()
+                return entry.getText and entry:getText() or entry.text
+        end
+        function field:setText(value)
+                self.text = tostring(value or "")
+                if entry.setText then entry:setText(self.text) else entry.text = self.text end
+                return self
+        end
+        function field:setEnabled(value)
+                options.enabled = value ~= false
+                if entry.setEditable then entry:setEditable(options.enabled) end
+                return self
+        end
+        function field:setEditable(value) return self:setEnabled(value) end
+        function field:setOnlyNumbers(value)
+                if entry.setOnlyNumbers then entry:setOnlyNumbers(value == true) end
+                return self
+        end
+        function field:setMaxTextLength(value)
+                if entry.setMaxTextLength then entry:setMaxTextLength(value) end
+                return self
+        end
+        function field:setPlaceholderText(value)
+                if entry.setPlaceholderText then entry:setPlaceholderText(tostring(value or "")) end
+                return self
+        end
+        -- Preserve the vanilla surface historically exposed by Controls.field.
+        -- The entry remains the only text backend; these forwards make the
+        -- container compatible with existing focus, selection and font callers.
+        field.javaObject = entry.javaObject
+        field.target = entry.target
+        local function forward(method)
+                return function(self, ...)
+                        if type(entry[method]) == "function" then return entry[method](entry, ...) end
+                        return nil
+                end
+        end
+        for _, method in ipairs({ "focus", "instantiate", "getInternalText", "selectAll",
+                "setTextEntryBox", "setFont" }) do
+                field[method] = forward(method)
+        end
+        function field:getUIName()
+                if type(entry.getUIName) == "function" then return entry:getUIName() end
+                return "ISTextEntryBox"
+        end
+        field.onTextChange = function(self)
+                return callback(self, options, "onChange", self:getText())
+        end
+        field.onPressEnter = function(self)
+                if options.enabled == false then return false end
+                return callback(self, options, "onSubmit", self:getText())
+        end
+        entry.onTextChange = function() return field:onTextChange() end
+        entry.onPressEnter = function() return field:onPressEnter() end
+        local function reflow(self)
+                entry:setX(self._sikTextInset)
+                entry:setY(0)
+                entry:setWidth(math.max(1, self.width - self._sikTextInset * 2))
+                entry:setHeight(self.height)
+                return self
+        end
+        local baseSetWidth, baseSetHeight = field.setWidth, field.setHeight
+        field.setWidth = function(self, width)
+                baseSetWidth(self, width)
+                return reflow(self)
+        end
+        field.setHeight = function(self, height)
+                baseSetHeight(self, height)
+                return reflow(self)
+        end
+        function field:setBounds(x, y, width, height)
+                self:setX(x); self:setY(y)
+                self:setWidth(width); self:setHeight(height)
+                return self
+        end
+        field.entry = entry
+        field:addChild(entry)
+        decorate(field, "field", options)
+        local fieldDispose = field.dispose
+        field.dispose = function(self)
+                if self.entry then
+                        self:removeChild(self.entry)
+                        if self.entry.dispose then self.entry:dispose() end
+                        self.entry = nil
+                end
+                return fieldDispose(self)
+        end
+        field:setEnabled(options.enabled ~= false)
+        reflow(field)
+        return attach(parent, field)
 end
 
 function Controls.combo(parent, options)

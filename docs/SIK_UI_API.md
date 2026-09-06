@@ -137,6 +137,24 @@ row with truncated left text and a `sik.close.18` removal control.  Options are
 its close child and exposes `reflow(width)` plus idempotent `dispose()`.
 `UI.Controls.dismissibleRowHeight(options)` returns its standard allocation.
 
+### Inline child pager
+
+`UI.Table.create` keeps `pagination` as its single pagination option.  When
+`expansion` is present, it projects one inline pager row after each expanded
+parent instead of reserving a table-global footer.  The row is structural:
+it is not selectable, draggable, a tooltip item, a row-adapter callback or an
+object/row total.
+
+For external sources, provide `pagination={ pageSize=N, external=true,
+stateOf=function(parent,parentKey,table) return state end,
+onPageChange=function(context) end, labelOf=function(state,parent,parentKey,table)
+return localizedText end }`.  `state` may contain `page`, `totalRows`,
+`totalUnits`, `pending` and `stale`; `pending` or `stale` disable both arrows.
+`context` is `{playerNum, component, parentKey, parent, page}`.  The framework
+does not poll or fetch: `onPageChange` is declarative and the consumer refreshes
+the rows when its state changes.  `labelOf` owns localization and plural rules;
+without it the framework emits only a language-neutral numeric fallback.
+
 Constructors return `instance` on success, or `nil, reason` for invalid inputs
 or unsupported setup. Mutators return their instance/value on success, or
 `nil, reason` where the runtime can reject the request. `dispose()` is
