@@ -103,6 +103,12 @@ behavior.
 
 ### Editable-field submission
 
+`Controls.field` is a padded panel with one native text child, available as
+`field.entry`. The panel and child retain distinct native identities and their
+own vanilla instantiation lifecycle. Text, focus, selection and font operations
+are explicitly forwarded; `javaObject`, `target` and `instantiate` are not aliases
+of the child. Attach and resize the panel, not its text backend.
+
 `UI.Controls.field(parent, { onSubmit = callback })` invokes the optional
 callback only for that field's Enter submission, using the standard context
 envelope (`value` is the current text). Disabled fields do not submit. The

@@ -25,11 +25,13 @@ local field = Controls.field(parent, {
 	end,
 })
 
-T.ok(field.javaObject ~= nil, "field completes the vanilla instantiate lifecycle")
-T.eq(field.javaObject.editable, true, "enabled field applies editable after instantiate")
+-- Editable belongs to the native text child, never to the padded panel.
+-- The companion field_native_identity_contract covers the native parent graph.
+T.ok(field.entry.javaObject ~= nil, "text child completes the vanilla instantiate lifecycle")
+T.eq(field.entry.javaObject.editable, true, "enabled field applies editable after instantiate")
 
 local disabled = Controls.field(parent, { enabled = false })
-T.eq(disabled.javaObject.editable, false, "disabled field applies editable after instantiate")
+T.eq(disabled.entry.javaObject.editable, false, "disabled field applies editable after instantiate")
 disabled:dispose()
 
 field:setText("value from enter")

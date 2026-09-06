@@ -755,24 +755,18 @@ function Controls.field(parent, options)
                 if entry.setPlaceholderText then entry:setPlaceholderText(tostring(value or "")) end
                 return self
         end
-        -- Preserve the vanilla surface historically exposed by Controls.field.
-        -- The entry remains the only text backend; these forwards make the
-        -- container compatible with existing focus, selection and font callers.
-        field.javaObject = entry.javaObject
-        field.target = entry.target
+        -- Forward text operations, never native identity or lifecycle. Vanilla
+        -- addChild instantiates the panel separately: sharing the entry's Java
+        -- object here would make UITextBox2 its own child during rendering.
         local function forward(method)
                 return function(self, ...)
                         if type(entry[method]) == "function" then return entry[method](entry, ...) end
                         return nil
                 end
         end
-        for _, method in ipairs({ "focus", "instantiate", "getInternalText", "selectAll",
+        for _, method in ipairs({ "focus", "getInternalText", "selectAll",
                 "setTextEntryBox", "setFont" }) do
                 field[method] = forward(method)
-        end
-        function field:getUIName()
-                if type(entry.getUIName) == "function" then return entry:getUIName() end
-                return "ISTextEntryBox"
         end
         field.onTextChange = function(self)
                 return callback(self, options, "onChange", self:getText())
