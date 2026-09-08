@@ -3,8 +3,21 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
+## 1.0.1 - 2026-09-08
+
+### Added
+
+- Reusable scrollable descriptions and item annexes bounded by the viewport.
+
+### Improved and fixed
+
+- Mouse-relative tooltips with explicit element anchoring where appropriate.
+- Control and table sizing, spacing and composition, alerts and progress indicators.
+- Focus handling, Escape dismissal and cleanup for tooltip and annex surfaces.
+
 ## 1.0.0 — 2026-09-06
 
+- Provides standalone reusable windows, tabs, tables, forms, menus and lifecycle management through `SiK.UI`.
 - Rebuilt the public documentation from the current standalone runtime rather
   than from the catalog alone.
 - Added the public runtime reference for constructors, factories, lifecycle,
