@@ -420,27 +420,35 @@ local function transientPanel(options)
 	-- never clamp a valid brief into a wrapped layout.
 	local width = kind == "brief" and requestedWidth
 		or math.max(1, math.min(requestedWidth, availableWidth))
-	local document = Tooltip.createDocument({ sections = { {
+	local sourceSections = options.sections or { {
 		title = content.title, text = content.text or options.text,
 		tone = content.tone or options.tone, framed = false,
 		font = content.font or options.font,
 		paddingX = content.paddingX or options.paddingX,
 		paddingY = content.paddingY or options.paddingY,
 		align = kind == "brief" and "right" or content.align,
-	} } })
+	} }
+	local sections = {}
+	for index = 1, #sourceSections do
+		sections[index] = {}
+		for key, value in pairs(sourceSections[index]) do sections[index][key] = value end
+	end
+	local document = Tooltip.createDocument({ sections = sections })
 	local measured = document:measure(width)
-	local height = math.min(measured.height, math.max(1, safe.h))
+	local height = math.min(measured.height, math.max(1, math.min(safe.h,
+		tonumber(options.maxHeight) or safe.h)))
 	local scrollable = kind == "descriptive" and measured.height > height
 	local contentRect, trackRect
 	local outerWidth = measured.width
-	local section = document.sections[1]
 	if scrollable then
 		-- Use the already-approved Scroll geometry inside the tooltip frame. Its
 		-- gutter reduces the actual text width, so measure once again before the
 		-- content height is supplied to Scroll; the Scroll region owns the one
 		-- canonical 8 px inset, so the document must not apply it twice.
 		contentRect, trackRect = SiK.UI.Metrics.blockRects(outerWidth, height, true, 0, 0)
-		section.paddingX, section.paddingY = 0, 0
+		for index = 1, #document.sections do
+			document.sections[index].paddingX, document.sections[index].paddingY = 0, 0
+		end
 		measured = document:measure(contentRect.w)
 	end
 	local panel = ISPanel:new(0, 0, outerWidth, height)
@@ -501,6 +509,105 @@ local function transientPanel(options)
 		return true
 	end
 	return panel
+end
+
+-- A caller-owned annex can reuse the approved Tooltip + Scroll document
+-- without turning its native host into a descriptive tooltip. Geometry and
+-- source identity are supplied by the caller; no product objects are retained.
+function Tooltip.createScrollableSections(options)
+	options = type(options) == "table" and options or {}
+	local handle = { playerNum = tonumber(options.playerNum) or 0 }
+	local key, sections, bounds, closedKey
+	local function release()
+		local panel = handle.panel
+		if not panel then return end
+		Tooltip.hide(panel)
+		panel:dispose()
+		handle.panel = nil
+	end
+	function handle:hide()
+		release()
+		return true
+	end
+	function handle:close()
+		closedKey = key
+		release()
+		if type(options.onClose) == "function" then options.onClose(self) end
+		return true
+	end
+	function handle:isPointerOver()
+		local panel = self.panel
+		if not panel or not getMouseX or not getMouseY then return false end
+		if panel.isVisible and not panel:isVisible() then return false end
+		if panel.visible == false then return false end
+		local x, y, w, h = controlRect(panel)
+		local mx, my = getMouseX(), getMouseY()
+		return mx >= x and mx < x + w and my >= y and my < y + h
+	end
+	function handle:update(nextSections, identityKey, nextBounds)
+		if self.disposed then return nil, "disposed" end
+		if type(nextSections) ~= "table" or #nextSections == 0
+			or identityKey == nil or type(nextBounds) ~= "table" then
+			release(); return nil, "invalid_document"
+		end
+		for index = 1, #nextSections do
+			if type(nextSections[index]) ~= "table" or type(nextSections[index].lines) ~= "table" then
+				release(); return nil, "invalid_section"
+			end
+		end
+		for _, name in ipairs({ "x", "y", "w", "h" }) do
+			local value = nextBounds[name]
+			if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+				release(); return nil, "invalid_bounds"
+			end
+		end
+		if nextBounds.w <= 0 or nextBounds.h <= 0 then release(); return nil, "empty_bounds" end
+		local changed = key ~= identityKey or not bounds
+			or bounds.w ~= nextBounds.w or bounds.h ~= nextBounds.h
+		if changed then
+			release()
+			if key ~= identityKey then closedKey = nil end
+		end
+		key, sections = identityKey, nextSections
+		bounds = { x = nextBounds.x, y = nextBounds.y, w = nextBounds.w, h = nextBounds.h }
+		if closedKey == key then return nil, "closed" end
+		if not self.panel then
+			local panel, reason = transientPanel({ kind = "descriptive", sections = sections,
+				maxWidth = bounds.w, maxHeight = bounds.h, playerNum = self.playerNum,
+				environment = options.environment, theme = options.theme,
+				backgroundColor = options.backgroundColor, borderColor = options.borderColor })
+			if not panel then return nil, reason end
+			self.panel = panel
+			local previousUpdate = panel.update
+			panel.update = function(widget, ...)
+				if previousUpdate then previousUpdate(widget, ...) end
+				if type(options.isValid) == "function" then
+					local ok, valid = pcall(options.isValid, self)
+					if not ok or not valid then
+						self:hide()
+						if type(options.onInvalid) == "function" then options.onInvalid(self) end
+					end
+				end
+			end
+			panel._sikTooltipFocus = SiK.UI.FocusStack.install(panel, function()
+				return self:close()
+			end, { playerNum = self.playerNum, priority = SiK.UI.FocusStack.PRIORITY.TRANSIENT })
+			if panel.addToUIManager then panel:addToUIManager() end
+			panel:setVisible(true)
+			if panel.bringToTop then panel:bringToTop() end
+		end
+		local safe = SiK.UI.Viewport.safe(self.playerNum, options.environment, 0)
+		self.panel:setX(math.max(safe.x, math.min(bounds.x, safe.x + safe.w - self.panel.width)))
+		self.panel:setY(math.max(safe.y, math.min(bounds.y, safe.y + safe.h - self.panel.height)))
+		return self.panel
+	end
+	function handle:dispose()
+		if self.disposed then return false end
+		release()
+		self.disposed, sections, bounds = true, nil, nil
+		return true
+	end
+	return handle
 end
 
 local function sameSafeRect(left, right)

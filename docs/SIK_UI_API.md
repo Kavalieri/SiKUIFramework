@@ -168,6 +168,19 @@ already-owned object-tooltip host. It creates no panel and does not wrap the
 vanilla renderer. Object descriptions remain owned by their product and use
 localized semantic line breaks when needed.
 
+`Tooltip.createScrollableSections(options)` creates a neutral, separately owned
+document handle for an oversized annex. It never replaces the native object
+host. Options include `playerNum`, theme/colors and `isValid`, `onInvalid`,
+`onClose` callbacks. `handle:update(sections, identityKey, {x,y,w,h})` returns
+the visible panel or `nil, reason`; unchanged identity and bounds reuse layout
+and scroll offset. Bounds must be finite and positive. The panel uses canonical
+Block/Scroll geometry and clamps to the player's safe viewport. `isPointerOver`,
+`hide`, `close` and idempotent `dispose` complete its lifecycle. Escape closes
+only that player's transient and suppresses reopening the same document until
+its identity changes. The caller owns hover retention and restoration of any
+external host properties. Validation runs only with the visible panel's update;
+no global tick hook is installed. Every owner must dispose the handle on exit.
+
 Compatibility in Framework 1.0.x maps legacy `option`/`rail` profiles to
 `brief`, and `informational`, `compact`, or an omitted profile to
 `descriptive`; it emits no new trace. Profiles are not a semantic API and this
