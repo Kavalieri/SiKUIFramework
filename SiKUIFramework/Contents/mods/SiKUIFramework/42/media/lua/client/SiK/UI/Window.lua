@@ -789,6 +789,7 @@ function Window.apply(panel, options)
 			x = 0, y = 0, label = header.operation.label or header.operation.text,
 			value = header.operation.value, status = header.operation.status,
 			tone = header.operation.tone, mode = header.operation.mode,
+			showProgress = header.operation.showProgress,
 			progressWidth = header.operation.progressWidth, playerNum = panel.playerNum, theme = options.theme,
 		})
 	end
@@ -890,6 +891,7 @@ function Window.apply(panel, options)
 			if not self.headerOperationControl then
 				self.headerOperationControl = SiK.UI.Controls.headerOperation(self, { label = spec.label or spec.text,
 					value = spec.value, status = spec.status, tone = spec.tone, mode = spec.mode,
+					showProgress = spec.showProgress,
 					progressWidth = spec.progressWidth,
 					playerNum = self.playerNum, theme = self._sikWindowOptions.theme })
 				relayPassiveHeaderPointer(self.headerOperationControl)

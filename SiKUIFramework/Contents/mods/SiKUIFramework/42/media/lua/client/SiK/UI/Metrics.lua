@@ -23,6 +23,10 @@ Metrics.block = Metrics.block or {
 
 Metrics.table = Metrics.table or {
 	rowHeight = 40,
+	compact = {
+		rowHeight = 32,
+		rowVerticalPadding = 8,
+	},
 	headerHeight = 34,
 	columnGap = 8,
 	cellPadding = 6,
@@ -130,7 +134,14 @@ function Metrics.tokens(overrides)
 	end
 	if type(overrides.table) == "table" then
 		for key, value in pairs(overrides.table) do
-			out.table[key] = numberOr(value, out.table[key])
+			if key == "compact" and type(value) == "table" then
+				out.table.compact = out.table.compact or {}
+				for compactKey, compactValue in pairs(value) do
+					out.table.compact[compactKey] = numberOr(compactValue, out.table.compact[compactKey])
+				end
+			else
+				out.table[key] = numberOr(value, out.table[key])
+			end
 		end
 	end
 	out.safeMargin = numberOr(overrides.safeMargin, out.safeMargin)

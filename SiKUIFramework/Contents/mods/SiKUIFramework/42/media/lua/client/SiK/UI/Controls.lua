@@ -2,7 +2,7 @@ require "SiK/UI/Namespace"
 require "SiK/UI/Metrics"
 require "SiK/UI/Layout"
 require "SiK/UI/Theme"
-require "SiK/UI/Icon"
+local Icon = require "SiK/UI/Icon"
 require "SiK/UI/Tooltip"
 require "SiK/UI/Combo"
 require "ISUI/ISPanel"
@@ -58,6 +58,7 @@ local function decorate(widget, kind, options)
 			text = options.tooltip, playerNum = widget.playerNum,
 			placement = options.tooltipPlacement,
 			profile = options.tooltipProfile, maxWidth = options.tooltipMaxWidth,
+			kind = options.tooltipKind,
 			channel = options.tooltipChannel,
 		})
 	end
@@ -86,11 +87,12 @@ end
 function Controls.setTooltip(control, value, options)
 	if type(control) ~= "table" then return nil, "invalid_control" end
 	if control._sikTooltipHandle and not control._sikTooltipHandle.disposed then
-		control._sikTooltipHandle:setText(value)
+		local updated, reason = control._sikTooltipHandle:setText(value)
+		if not updated then return nil, reason end
 		return control
 	end
 	options = options or {}
-	control._sikTooltipHandle = SiK.UI.Tooltip.attach(control, {
+	local handle, reason = SiK.UI.Tooltip.attach(control, {
 		text = value,
 		replace = true,
 		playerNum = options.playerNum or control.playerNum or 0,
@@ -99,9 +101,12 @@ function Controls.setTooltip(control, value, options)
 		placement = options.placement or options.tooltipPlacement,
 		environment = options.environment,
 		profile = options.profile or options.tooltipProfile,
+		kind = options.kind or options.tooltipKind,
 		maxWidth = options.maxWidth or options.tooltipMaxWidth,
 		channel = options.channel or options.tooltipChannel,
 	})
+	if not handle then return nil, reason end
+	control._sikTooltipHandle = handle
 	return control
 end
 
@@ -724,8 +729,12 @@ function Controls.field(parent, options)
 			b = theme.text.b, a = theme.text.a }
 		if type(basePrerender) == "function" then return basePrerender(self) end
 	end
-        if options.numeric and entry.setOnlyNumbers then entry:setOnlyNumbers(true) end
-        if options.maxLength and entry.setMaxTextLength then entry:setMaxTextLength(options.maxLength) end
+	if options.numeric and entry.setOnlyNumbers then entry:setOnlyNumbers(true) end
+	if options.maxLength and entry.setMaxTextLength then entry:setMaxTextLength(options.maxLength) end
+	-- These are immutable construction descriptors on the public wrapper.  The
+	-- native entry remains the only mutable input backend.
+	field.onlyNumbers = options.numeric == true
+	field.maxLength = options.maxLength
 	if options.placeholder and entry.setPlaceholderText then
 		entry:setPlaceholderText(tostring(options.placeholder))
 	end
@@ -1108,6 +1117,55 @@ function Controls.status(parent, options)
 		end
 		return SiK.UI.Theme.color(value or "textMuted", options.theme)
 	end
+	if options.wrap == true then
+		local framed, indicator = options.framed == true, options.indicator == true
+		local padX = framed and 10 or 0
+		local padY = framed and 6 or 0
+		local leading = indicator and 16 or 0
+		local lineHeight = fontHeight(options.font or UIFont.Small) + 2
+		local panel = Controls.panel(nil, { x = options.x, y = options.y,
+			w = options.w or options.width or 200, h = 1, drawBackground = false,
+			playerNum = options.playerNum, controlId = "wrappedStatus" })
+		panel.text, panel.tone = tostring(options.text or ""), tone
+		panel.statusColor = options.color
+		function panel:reflow(width)
+			if width then self:setWidth(math.max(1, n(width, self.width))) end
+			self.lines = Controls.wrapText(self.text, math.max(1, self.width - padX * 2 - leading),
+				options.font or UIFont.Small)
+			self:setHeight(math.max(framed and 30 or lineHeight, #self.lines * lineHeight + padY * 2))
+			return self
+		end
+		function panel:setStatus(text, nextTone, nextColorValue)
+			self.text = tostring(text or "")
+			if nextTone ~= nil then self.tone = nextTone; self.statusColor = nil end
+			if nextColorValue ~= nil then self.statusColor = nextColorValue end
+			return self:reflow()
+		end
+		panel.prerender = function(self)
+			local theme = SiK.UI.Theme.tokens(options.theme)
+			local color = statusColor(self.statusColor or self.tone)
+			if framed then
+				local background, border = theme.surfaceAlt, theme.border
+				self:drawRect(0, 0, self.width, self.height, background.a, background.r, background.g, background.b)
+				self:drawRectBorder(0, 0, self.width, self.height, border.a, border.r, border.g, border.b)
+			end
+			if indicator then
+				-- Eight-pixel semantic state marker, independent of product assets.
+				for row = 0, 7 do
+					local inset = (row == 0 or row == 7) and 2 or ((row == 1 or row == 6) and 1 or 0)
+					self:drawRect(padX + inset, padY + 4 + row, 8 - inset * 2, 1,
+						color.a, color.r, color.g, color.b)
+				end
+			end
+			local textColor = indicator and statusColor(options.textTone or "textMuted") or color
+			for index = 1, #self.lines do
+				self:drawText(self.lines[index], padX + leading, padY + (index - 1) * lineHeight,
+					textColor.r, textColor.g, textColor.b, textColor.a, options.font or UIFont.Small)
+			end
+		end
+		panel:reflow()
+		return attach(parent, panel)
+	end
 	if options.indicator == true then
 		local metrics = Controls.metrics(options.profile)
 		local width = math.max(1, n(options.w or options.width, 200))
@@ -1335,13 +1393,61 @@ function Controls.alertRow(parent, options)
         panel.glow = options.glow == true
         panel.tone = options.tone or "text"
         panel.lines = {}
+	panel.progress = nil
+	local progressWidth = 72
+	local progressHeight = 10
+	local progressGap = 8
+	local minInlineTextWidth = 80
+	local function removeProgress(self)
+		if not self.progress then return end
+		self:removeChild(self.progress)
+		if self.progress.dispose then self.progress:dispose() end
+		self.progress = nil
+	end
+	local function setProgress(self, spec)
+		if spec == false then
+			removeProgress(self)
+			return self
+		end
+		if type(spec) ~= "table" then return self end
+		if not self.progress then
+			self.progress = Controls.progress(self, { w = progressWidth, h = progressHeight,
+				value = spec.value, status = spec.status, tone = spec.tone,
+				mode = spec.mode, theme = options.theme, label = "" })
+		else
+			self.progress:setProgress(spec)
+		end
+		self.progress.label = ""
+		return self
+	end
         local function reflow(self, width)
                 if width ~= nil then self:setWidth(math.max(1, n(width, self.width))) end
-                local textWidth = math.max(1, self.width - size - gap)
+		local textX = size + gap
+		local available = math.max(1, self.width - textX)
+		local inline = self.progress ~= nil
+			and available - progressWidth - progressGap >= minInlineTextWidth
+		local textWidth = inline and available - progressWidth - progressGap or available
                 self.lines = Controls.wrapText(self.text, textWidth, font)
                 local textHeight = #self.lines * fontHeight(font)
                         + math.max(0, #self.lines - 1) * lineGap
-                self:setHeight(math.max(size, textHeight))
+		self._sikAlertTextX = textX
+		self._sikAlertTextWidth = textWidth
+		self._sikAlertInlineProgress = inline
+		if self.progress then
+			local barWidth = math.max(1, math.min(progressWidth, self.width))
+			self.progress:setWidth(barWidth)
+			self.progress:setHeight(progressHeight)
+			self.progress:setX(math.max(0, self.width - barWidth))
+			if inline then
+				self:setHeight(math.max(size, textHeight, progressHeight))
+				self.progress:setY(math.max(0, math.floor((self.height - progressHeight) / 2)))
+			else
+				self:setHeight(math.max(size, textHeight) + progressGap + progressHeight)
+				self.progress:setY(self.height - progressHeight)
+			end
+		else
+			self:setHeight(math.max(size, textHeight))
+		end
                 return self
         end
         panel.prerender = function(self)
@@ -1358,8 +1464,9 @@ function Controls.alertRow(parent, options)
                 local textHeight = #self.lines * fontHeight(font)
                         + math.max(0, #self.lines - 1) * lineGap
                 local textY = math.floor((self.height - textHeight) / 2)
+		if self.progress and not self._sikAlertInlineProgress then textY = 0 end
                 for index = 1, #self.lines do
-                        self:drawText(self.lines[index], size + gap, textY,
+			self:drawText(self.lines[index], self._sikAlertTextX, textY,
                                 textColor.r, textColor.g, textColor.b, textColor.a, font)
                         textY = textY + fontHeight(font) + lineGap
                 end
@@ -1371,8 +1478,17 @@ function Controls.alertRow(parent, options)
                 if spec.severity ~= nil then self.severity = spec.severity end
                 if spec.glow ~= nil then self.glow = spec.glow == true end
                 if spec.tone ~= nil then self.tone = spec.tone end
+		if spec.progress ~= nil then setProgress(self, spec.progress) end
                 return reflow(self)
         end
+	local previousDispose = panel.dispose
+	panel.dispose = function(self)
+		if self._sikAlertRowDisposed then return false end
+		self._sikAlertRowDisposed = true
+		removeProgress(self)
+		return previousDispose(self)
+	end
+	setProgress(panel, options.progress)
         panel.reflow = function(self, width) return reflow(self, width) end
         reflow(panel)
         return attach(parent, panel)
@@ -1441,32 +1557,65 @@ function Controls.headerOperation(parent, options)
 	parent, options = controlArgs(parent, options)
 	local label = tostring(options.label or "")
 	local progressWidth = math.max(24, n(options.progressWidth, 72))
+	local progressHeight = math.max(1, n(options.progressHeight, 10))
+	local labelGap = math.max(0, n(options.labelGap, Controls.metrics(options.profile).controlGap))
 	local font = options.font or UIFont.Small
 	local height = math.max(fontHeight(font), n(options.h or options.height, 16))
 	local width = n(options.w or options.width,
-		Controls.measureButtonWidth(label, font, 0, 1) + 8 + progressWidth)
+		Controls.measureButtonWidth(label, font, 0, 1)
+			+ (options.showProgress ~= false and labelGap + progressWidth or 0))
 	local panel = Controls.panel(nil, { x = options.x, y = options.y, w = width, h = height,
 		playerNum = options.playerNum, controlId = "headerOperation" })
 	panel.label = label
-	panel.progress = Controls.progress(panel, { x = math.max(0, width - progressWidth), y = math.max(0, math.floor((height - 8) / 2)),
-		w = progressWidth, h = 8, value = options.value, status = options.status, tone = options.tone,
+	panel.labelGap = labelGap
+	panel.showProgress = options.showProgress ~= false
+	panel.progress = Controls.progress(panel, { x = math.max(0, width - progressWidth), y = math.max(0, math.floor((height - progressHeight) / 2)),
+		w = progressWidth, h = progressHeight, value = options.value, status = options.status, tone = options.tone,
 		mode = options.mode, theme = options.theme, label = "" })
+	-- The label owns the only local stencil. It must be a sibling of progress:
+	-- a stencil on the operation panel would also clip the right-hand bar during
+	-- the child pass.
+	panel.labelClip = Controls.panel(panel, { x = 0, y = 0, w = 1, h = height,
+		playerNum = options.playerNum, controlId = "headerOperationLabel" })
 	panel._sikNaturalWidth = width
 	local function reflowOperation(self)
-		local barW = math.min(progressWidth, math.max(1, self.width))
-		self.progress:setX(math.max(0, self.width - barW))
-		self.progress:setY(math.max(0, math.floor((self.height - 8) / 2)))
-		self.progress:setWidth(barW)
-		self.progress:setHeight(math.min(8, math.max(1, self.height)))
+		local barW = self.showProgress and math.min(progressWidth, math.max(1, self.width)) or 0
+		local barX = math.max(0, self.width - barW)
+		self.progress:setVisible(self.showProgress)
+		self.progress:setX(barX)
+		self.progress:setY(math.max(0, math.floor((self.height - progressHeight) / 2)))
+		self.progress:setWidth(math.max(1, barW))
+		self.progress:setHeight(math.min(progressHeight, math.max(1, self.height)))
+		local labelW = self.showProgress and math.max(0, barX - self.labelGap) or self.width
+		self.labelRect = { x = 0, y = 0, w = labelW, h = self.height }
+		self.labelClip:setX(0)
+		self.labelClip:setY(0)
+		self.labelClip:setWidth(math.max(1, labelW))
+		self.labelClip:setHeight(self.height)
+		self.labelClip:setVisible(labelW > 0)
 	end
-	panel.prerender = function(self)
-		reflowOperation(self)
+	panel.labelClip.prerender = function(self)
+		local owner = panel
+		self._sikHeaderOperationStencil = false
+		if owner.labelRect.w < 1 then return end
 		local color = SiK.UI.Theme.color("textMuted", options.theme)
-		self:drawText(self.label, 0, math.floor((self.height - fontHeight(font)) / 2), color.r, color.g, color.b, color.a, font)
+		local fitted = Controls.truncateText(owner.label, owner.labelRect.w, font)
+		if fitted == "" then return end
+		if self.setStencilRect then
+			self:setStencilRect(0, 0, self.width, self.height)
+			self._sikHeaderOperationStencil = true
+		end
+		self:drawText(fitted, 0, math.floor((self.height - fontHeight(font)) / 2), color.r, color.g, color.b, color.a, font)
 	end
+	panel.labelClip.render = function(self)
+		if self._sikHeaderOperationStencil and self.clearStencilRect then self:clearStencilRect() end
+		self._sikHeaderOperationStencil = false
+	end
+	panel.prerender = function(self) reflowOperation(self) end
 	function panel:setOperation(spec)
 		spec = type(spec) == "table" and spec or { label = spec }
 		if spec.label ~= nil then self.label = tostring(spec.label) end
+		if spec.showProgress ~= nil then self.showProgress = spec.showProgress ~= false end
 		-- The operation owns the text. Passing the complete operation spec to the
 		-- nested progress bar also copied `label` into it, so every refresh painted
 		-- the same message twice (once here and once centred over the bar).
@@ -1478,7 +1627,8 @@ function Controls.headerOperation(parent, options)
 		})
 		self.progress.label = ""
 		self._sikNaturalWidth = Controls.measureButtonWidth(self.label, font, 0, 1)
-			+ 8 + progressWidth
+			+ (self.showProgress and self.labelGap + progressWidth or 0)
+		reflowOperation(self)
 		return self
 	end
 	function panel:reflow(nextWidth, nextHeight)
@@ -1579,6 +1729,7 @@ function Controls.sectionTitle(parent, options)
 			text = "", chrome = false, iconPadding = 0, iconSize = size,
 			tooltip = info.tooltip or options.tooltip, playerNum = options.playerNum,
 			tooltipProfile = info.profile or options.infoTooltipProfile or "informational",
+			tooltipKind = info.kind or options.infoTooltipKind or "descriptive",
 			tooltipMaxWidth = info.maxWidth or options.infoTooltipMaxWidth,
 			tooltipPlacement = info.placement or options.infoTooltipPlacement
 				or { anchor = "pointer", gap = 16 },
@@ -1720,11 +1871,51 @@ function Controls.blockHeader(parent, options)
 		return self:reflow(self.width)
 	end
 
+	-- Read-only contextual indicator: Info -> Indicator -> Title -> Actions.
+	-- The consumer owns its meaning and text; removing it releases its slot.
+	function header:setLeadingIndicator(descriptor)
+		if self._sikBlockHeaderDisposed then return nil, "disposed" end
+		if type(descriptor) ~= "table" or descriptor.icon == nil then
+			if self.leadingIndicator then self.leadingIndicator:dispose() end
+			self.leadingIndicator = nil
+			return self:reflow(self.width)
+		end
+		local tooltipOptions = {
+			kind = "descriptive", tooltipProfile = "informational",
+			tooltipChannel = "informational-help",
+			tooltipPlacement = { anchor = "pointer", gap = 16 },
+			playerNum = options.playerNum,
+		}
+		if not self.leadingIndicator then
+			self.leadingIndicator = Controls.iconButton(self, {
+				x = 0, y = 0, w = 24, h = 24, icon = descriptor.icon,
+				text = "", chrome = false, iconPadding = 0, iconSize = 24,
+				tooltip = descriptor.tooltip, tooltipKind = tooltipOptions.kind,
+				tooltipProfile = tooltipOptions.tooltipProfile,
+				tooltipChannel = tooltipOptions.tooltipChannel,
+				tooltipPlacement = tooltipOptions.tooltipPlacement, playerNum = options.playerNum,
+				onClick = function() return true end,
+			})
+		else
+			self.leadingIndicator:setTexture(descriptor.icon)
+			Controls.setTooltip(self.leadingIndicator, descriptor.tooltip, tooltipOptions)
+		end
+		self.leadingIndicator:setIconTint(descriptor.severity
+			and SiK.UI.Theme.color(descriptor.severity, options.theme) or nil)
+		return self:reflow(self.width)
+	end
+
 	function header:reflow(width)
 		if width ~= nil then self:setWidth(math.max(1, n(width, self.width))) end
 		local left = self.info and self.info.width + Controls.metrics(options.profile).controlGap or 0
 		local right = self.width
 		local gap = Controls.metrics(options.profile).controlGap
+		if self.info then self.info:setY(math.floor((self.height - self.info.height) / 2)) end
+		if self.leadingIndicator then
+			self.leadingIndicator:setX(left)
+			self.leadingIndicator:setY(math.floor((self.height - self.leadingIndicator.height) / 2))
+			left = left + self.leadingIndicator.width + gap
+		end
 		local count = #self.actionControls
 		local available = math.max(count, self.width - left - 1
 			- (count > 0 and gap * count or 0))
@@ -1756,6 +1947,7 @@ function Controls.blockHeader(parent, options)
 	header.dispose = function(self)
 		if self._sikBlockHeaderDisposed then return false end
 		self._sikBlockHeaderDisposed = true
+		if self.leadingIndicator then self.leadingIndicator:dispose(); self.leadingIndicator = nil end
 		for index = 1, #(self.actionControls or {}) do
 			self.actionControls[index]:dispose()
 		end
@@ -1769,6 +1961,7 @@ function Controls.blockHeader(parent, options)
 		actions = { descriptor }
 	end
 	header:setActions(actions or {})
+	header:setLeadingIndicator(options.leadingIndicator)
 	return header
 end
 

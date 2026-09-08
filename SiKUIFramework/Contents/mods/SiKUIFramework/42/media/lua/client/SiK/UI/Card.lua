@@ -127,7 +127,7 @@ function Card.create(options)
 			if self.header.info then
 				SiK.UI.Controls.setTooltip(self.header.info,
 					infoSpec.tooltip or options.tooltip or self.data.description or self.data.title,
-					{ playerNum = options.playerNum, profile = "informational",
+					{ playerNum = options.playerNum, kind = "descriptive", profile = "informational",
 						placement = options.tooltipPlacement,
 						channel = "informational-help" })
 			end

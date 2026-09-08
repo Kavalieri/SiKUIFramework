@@ -67,6 +67,7 @@ Capabilities.contracts = Capabilities.contracts or {
 	} },
 	["block.header"] = { componentType = "block", props = {
 		["info-visible"] = { kind = "boolean", default = false },
+		["leading-indicator"] = { kind = "data" },
 		actions = { kind = "data" },
 	} },
 	["form.fields"] = { componentType = "form", props = {

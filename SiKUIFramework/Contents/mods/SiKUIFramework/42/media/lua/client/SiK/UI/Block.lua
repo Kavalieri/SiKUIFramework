@@ -376,7 +376,7 @@ function Block.create(options)
 	if not container then return nil, err end
 	local panel = container.panel
 	local hasHeader = options.title ~= nil or options.tooltip ~= nil
-		or options.info ~= nil or options.actions ~= nil
+		or options.info ~= nil or options.leadingIndicator ~= nil or options.actions ~= nil
 	local controlMetrics = SiK.UI.Controls.metrics(options.profile)
 	local metricTokens = SiK.UI.Metrics.tokens(options.metrics)
 	local headerHeight = hasHeader and math.max(1,
@@ -413,7 +413,8 @@ function Block.create(options)
 		instance.header = SiK.UI.Controls.blockHeader(panel, {
 			x = 0, y = 0, w = math.max(1, w), h = headerHeight,
 			text = options.title or "", tooltip = options.tooltip,
-			info = options.info, actions = options.actions,
+			info = options.info, leadingIndicator = options.leadingIndicator,
+			actions = options.actions,
 			profile = options.profile, theme = options.theme,
 			playerNum = options.playerNum,
 			onActivate = options.onActivate,

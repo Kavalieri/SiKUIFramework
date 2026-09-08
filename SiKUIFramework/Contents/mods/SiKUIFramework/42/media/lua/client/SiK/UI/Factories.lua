@@ -275,6 +275,7 @@ local function blockFactory(parent, props, context)
 		options.tooltip = props.help or props.tooltip
 	options.info = options.tooltip and headerCapability["info-visible"] ~= false
 		and { tooltip = options.tooltip } or nil
+	options.leadingIndicator = headerCapability["leading-indicator"]
 	options.actions = headerActions
 		options.scrollable = props.scrollable == true
 	options.fill = props.variant == "fill" or props.fill == true
@@ -390,11 +391,32 @@ end
 
 local function tooltipFactory(parent, props, context)
 	local data = props.data
-	local options = { control = parent, playerNum = context.playerNum,
-		text = type(data) == "table" and data.text or data }
+	local options = { playerNum = context.playerNum }
+	if type(data) == "table" then
+		-- A declarative tooltip keeps its class and geometry explicit. In
+		-- particular, a descriptor without `text` is not a stringified table.
+		if data.text ~= nil then options.text = data.text end
+		if data.content ~= nil then
+			options.content = data.content
+			-- Text-only attachment supplies this lifecycle automatically. Retain the
+			-- same visible transient behavior for a declarative content record.
+			options.variant = data.variant or "transient"
+		end
+		options.kind = data.kind
+		options.placement = data.placement
+		options.profile = data.profile
+		options.maxWidth = data.maxWidth
+	else
+		options.text = data
+	end
 	local capability = props.capabilities["tooltip.vanilla-chain"]
-	if capability and capability.lazy and type(data) == "table" then options.factory = data.factory end
-	local handle, err = SiK.UI.Tooltip.attach(options)
+	if capability and capability.lazy and type(data) == "table" and type(data.factory) == "function" then
+		-- Object hosts are already created by their consumer; a lazy factory is an
+		-- informational surface and is invalid for kind=object.
+		if data.kind == "object" then return nil, "object_content_unsupported" end
+		options.factory = data.factory
+	end
+	local handle, err = SiK.UI.Tooltip.attach(parent, options)
 	if not handle then return nil, err end
 	local previousMove = parent.onMouseMove
 	local moveWrapper = function(self, ...)
@@ -477,17 +499,18 @@ local controlVariantKinds = {
 local function controlPresentation(props)
 	local data = props.data
 	local result = {
-		text = props.label or props.text, payload = nil,
+		text = props.label or props.text, payload = nil, tooltip = props.tooltip,
 		items = props.items or props.options, selected = props.selected,
 		tone = props.tone, color = props.color, indicator = props.indicator,
 		value = props.value, label = props.label, enabled = props.enabled,
 		status = props.status, mode = props.mode, severity = props.severity,
-		glow = props.glow, size = props.size,
+		glow = props.glow, size = props.size, progress = props.progress,
 		icon = props.icon or props["icon-key"], state = props.state,
 		met = props.met, iconSize = props.iconSize or props["icon-size"],
 	}
 	if type(data) == "table" then
 		if data.text ~= nil then result.text = data.text end
+		if data.tooltip ~= nil then result.tooltip = data.tooltip end
 		if data.label ~= nil then result.label = data.label end
 		if data.items ~= nil then result.items = data.items
 		elseif data.options ~= nil then result.items = data.options end
@@ -500,6 +523,7 @@ local function controlPresentation(props)
 		if data.mode ~= nil then result.mode = data.mode end
 		if data.severity ~= nil then result.severity = data.severity end
 		if data.glow ~= nil then result.glow = data.glow end
+		if data.progress ~= nil then result.progress = data.progress end
 		if data.size ~= nil then result.size = data.size end
 		if data.icon ~= nil then result.icon = data.icon
 		elseif data.texture ~= nil then result.icon = data.texture end
@@ -524,7 +548,7 @@ local function controlFactory(parent, props, context)
         -- accessible tooltip, never visible text competing with the glyph.  A
         -- labelled action uses the regular button primitive instead.
         local text = presentation.text
-        local tooltip = props.tooltip
+        local tooltip = presentation.tooltip
         if kind == "iconButton" then
                 tooltip = tooltip or presentation.label or presentation.text
                 text = ""
@@ -532,6 +556,7 @@ local function controlFactory(parent, props, context)
         local fieldAction = kind == "iconButton" and props.variant == "field-action"
         return SiK.UI.Controls.create(kind, { parent = parent, x = props.bounds.x, y = props.bounds.y,
                 w = props.bounds.w, h = props.bounds.h, text = text, tooltip = tooltip,
+		tooltipKind = kind == "iconButton" and "brief" or "descriptive",
 		payload = presentation.payload, icon = presentation.icon, state = presentation.state,
 		met = presentation.met, enabled = presentation.enabled,
 		iconSize = presentation.iconSize,
@@ -541,6 +566,7 @@ local function controlFactory(parent, props, context)
 		tone = presentation.tone, color = presentation.color, indicator = presentation.indicator,
 		value = presentation.value, label = presentation.label, status = presentation.status,
 		mode = presentation.mode, severity = presentation.severity, glow = presentation.glow,
+		progress = presentation.progress,
 		size = presentation.size, playerNum = context.playerNum,
 		profile = context.profileId,
 		onClick = function(payload) return emit(props, "activate", payload) end,
@@ -730,6 +756,9 @@ local function blockUpdate(handle, props)
 			and headerCapability.actions or {}
 		if header.setName then header:setName(tostring(props.title or ""))
 		elseif header.setText then header:setText(tostring(props.title or "")) end
+		if header.setLeadingIndicator then
+			header:setLeadingIndicator(headerCapability["leading-indicator"])
+		end
 		if header.setActions then header:setActions(headerActions) end
 	end
 	return handle
@@ -782,12 +811,16 @@ local function tabsReflow(handle, bounds) return handle:reflow(bounds) end
 local function controlUpdate(handle, props)
         local presentation = controlPresentation(props)
         local text = presentation.text
+	if handle._sikUiControl ~= "iconButton" and presentation.tooltip ~= nil
+		and SiK.UI.Controls.setTooltip then
+		SiK.UI.Controls.setTooltip(handle, presentation.tooltip)
+	end
         if handle._sikUiControl == "iconButton" then
-                local tooltip = props.tooltip or presentation.label or presentation.text
+                local tooltip = presentation.tooltip or presentation.label or presentation.text
                 if handle.setTitle then handle:setTitle("")
                 elseif handle.setName then handle:setName("")
                 elseif handle.setText then handle:setText("") end
-                if SiK.UI.Controls.setTooltip then SiK.UI.Controls.setTooltip(handle, tooltip) end
+                if SiK.UI.Controls.setTooltip then SiK.UI.Controls.setTooltip(handle, tooltip, { kind = "brief" }) end
                 text = nil
         end
 	if handle._sikUiControl == "alertRow" and handle.setAlert then
@@ -889,8 +922,8 @@ Factories.definitions = Factories.definitions or {
                 preserve = tablePreserve, reflow = tableReflow,
                 validateAdopt = requireMethods({ "setRows", "setColumns", "captureState", "restoreState", "reflow" }) },
         block = { runtimeFactory = "SiK.UI.Block.create", create = blockFactory,
-		allowedChildren = { "container", "scroll", "table", "virtual-list", "form", "card", "card-collection", "collection", "action-group", "control" },
-		parents = { "container" },
+                allowedChildren = { "container", "scroll", "table", "virtual-list", "block", "form", "card", "card-collection", "collection", "action-group", "control" },
+                parents = { "container", "block" },
 		update = blockUpdate, reflow = blockReflow,
 		validateAdopt = requireMethods({ "setBounds", "reflow", "setContentHeight", "getContentRect" }) },
         form = { runtimeFactory = "SiK.UI.Form.create", create = formFactory,

@@ -263,8 +263,15 @@ function Table.metrics(options)
 	local tokens = SiK.UI.Metrics.tokens(options.metrics)
 	local font = options.font or (UIFont and UIFont.Small) or nil
 	local resolvedFontHeight = fontHeight(font)
+	local compact = options.density == "compact" and tokens.table.compact or nil
+	local rowVerticalPadding = compact and numberOr(compact.rowVerticalPadding,
+		tokens.table.rowVerticalPadding) or tokens.table.rowVerticalPadding
+	local nominalRowHeight = compact and numberOr(compact.rowHeight, tokens.table.rowHeight)
+		or tokens.table.rowHeight
+	local minimumRowHeight = resolvedFontHeight + math.max(0, rowVerticalPadding) * 2
 	return { font = font, fontHeight = resolvedFontHeight,
-		rowHeight = math.max(1, numberOr(options.rowHeight, tokens.table.rowHeight)),
+		rowHeight = math.max(minimumRowHeight, nominalRowHeight, numberOr(options.rowHeight, nominalRowHeight)),
+		rowVerticalPadding = math.max(0, rowVerticalPadding), density = compact and "compact" or "standard",
 		headerHeight = math.max(resolvedFontHeight + tokens.table.headerVerticalPadding * 2,
 			numberOr(options.headerHeight, tokens.table.headerHeight)),
 		gap = math.max(0, numberOr(options.columnGap or options.gap, tokens.table.columnGap)),
@@ -451,7 +458,7 @@ end
 function Table.rowRect(contentRect, rowIndex, options)
 	options = options or {}
 	local metrics, index = Table.metrics(options), math.max(1, math.floor(numberOr(rowIndex, 1)))
-	local height, header = numberOr(options.rowHeight, metrics.rowHeight), numberOr(options.headerHeight, 0)
+	local height, header = metrics.rowHeight, numberOr(options.headerHeight, 0)
 	return { x = numberOr(contentRect and contentRect.x, 0),
 		y = numberOr(contentRect and contentRect.y, 0) + header + (index - 1) * height,
 		w = math.max(0, numberOr(contentRect and (contentRect.w or contentRect.contentW), 0)),
@@ -780,6 +787,19 @@ function TableInstance:_projectParent(parent, out)
 			hasChildren = parent.hasChildren == true }
 	local children = parent.children
 	if not parent.hasChildren then return end
+	if not self.pagination then
+		if not self.expanded[parent.key] then return end
+		for childIndex = 1, #children do
+			local child = children[childIndex]
+			local childKey = self.expansion.keyOf and self.expansion.keyOf(child, childIndex, parent.item)
+				or (tostring(parent.key) .. ":" .. tostring(childIndex))
+			local selection = self.semanticById[semanticId("child", childKey, parent.key)]
+			out[#out + 1] = { data = child, depth = 1, key = childKey,
+				visualKey = selection.id, semantic = selection, parentKey = parent.key,
+				sourceIndex = childIndex, hasChildren = false }
+		end
+		return
+	end
 	local size = self.pagination and self.pagination.pageSize or #children
 	local total, requestedPage = #children, self.childPages[parent.key]
 	local externalState = nil
@@ -834,7 +854,7 @@ function TableInstance:_projectParent(parent, out)
 	-- sentence, including plural forms and locale-specific unit labels.
 	if type(label) ~= "string" or label == "" then
 		label = tostring(state.first) .. "-" .. tostring(state.last) .. " / "
-			.. tostring(state.totalRows) .. " \183 " .. tostring(state.totalUnits)
+			.. tostring(state.totalRows) .. " - " .. tostring(state.totalUnits)
 	end
 	out[#out + 1] = { kind = "pager", data = nil, depth = 1,
 		key = "pager:" .. tostring(parent.key), visualKey = "pager:" .. tostring(parent.key),

@@ -279,6 +279,7 @@ function Tabs.create(options)
 				tooltip = tabTooltip,
 				tooltipProfile = options.tooltipMode == "flyout"
 					and (options.tooltipProfile or "option") or options.tooltipProfile,
+				tooltipKind = options.tooltipMode == "flyout" and "brief" or options.tooltipKind,
 				tooltipMaxWidth = options.tooltipMode == "flyout"
 					and (options.tooltipMaxWidth or 220) or options.tooltipMaxWidth,
 				tooltipPlacement = options.tooltipMode == "flyout" and {

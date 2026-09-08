@@ -316,6 +316,7 @@ function Navigation.create(options)
 			and (placement == "left" and "before" or "after") or options.tooltipSide,
 		tooltipGap = options.tooltipGap,
 		tooltipProfile = options.railTooltip == true and "rail" or options.tooltipProfile,
+		tooltipKind = options.railTooltip == true and "brief" or options.tooltipKind,
 		tooltipBackgroundColor = options.tooltipBackgroundColor,
 		tooltipBorderColor = options.tooltipBorderColor,
 		tooltipTextColor = options.tooltipTextColor,

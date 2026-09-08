@@ -2,6 +2,8 @@ require "SiK/UI/Namespace"
 require "SiK/UI/Viewport"
 require "SiK/UI/Theme"
 require "SiK/UI/Metrics"
+require "SiK/UI/Scroll"
+require "SiK/UI/FocusStack"
 require "ISUI/ISPanel"
 
 local Tooltip = SiK.UI.Tooltip or {}
@@ -86,6 +88,18 @@ function Tooltip.measureSection(section, width, options)
 	return { width = tonumber(width) or 240, height = height, innerWidth = innerWidth,
 		padding = padding, paddingX = paddingX, paddingY = paddingY, gap = gap,
 		lineHeight = lineHeight, title = title, lines = lines, font = font }
+end
+
+-- Object sections are data for an already-owned InventoryItem tooltip host.
+-- They never create an informational panel or invoke the vanilla renderer.
+function Tooltip.objectSection(lines, options)
+	options = options or {}
+	local section = {}
+	for key, value in pairs(options) do section[key] = value end
+	section.kind = "object"
+	if type(lines) == "table" then section.lines = lines
+	else section.text = lines end
+	return section
 end
 
 function Tooltip.renderFrame(panel, x, y, width, height, options)
@@ -337,9 +351,17 @@ end
 
 local function placeTransient(widget, control, options)
 	local placement = options.placement or {}
-	if placement.anchor == "pointer" or not control then
+	-- A scrollable descriptive document must be reachable by pointer.  It is the
+	-- sole transient that deliberately switches from the ordinary pointer anchor
+	-- to a touching control-adjacent edge.
+	if widget and widget._sikTooltipScrollable then
+		placement = { anchor = "control", side = placement.side or "after", gap = 0 }
+	end
+	-- Pointer placement is the framework default for ordinary controls and
+	-- informational help.  A body/rail flyout must ask for its control anchor.
+	if placement.anchor ~= "control" or not control then
 		return Tooltip.position(widget, options.playerNum or 0,
-			placement.gap or options.gap, options.environment)
+				placement.gap or options.gap, options.environment)
 	end
 	local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
 	local cx, cy, cw, ch = controlRect(control)
@@ -347,10 +369,23 @@ local function placeTransient(widget, control, options)
 	local height = widget.getHeight and widget:getHeight() or widget.height or 0
 	local gap = math.max(0, tonumber(placement.gap or options.gap) or 4)
 	local side = placement.side or "after"
-	local x, y = cx + cw + gap, cy
-	if side == "before" then x = cx - width - gap
-	elseif side == "above" then x, y = cx, cy - height - gap
-	elseif side == "below" then x, y = cx, cy + ch + gap end
+	local function coordinates(which)
+		if which == "before" then return cx - width - gap, cy end
+		if which == "above" then return cx, cy - height - gap end
+		if which == "below" then return cx, cy + ch + gap end
+		return cx + cw + gap, cy
+	end
+	local function fits(x, y)
+		return x >= safe.x and y >= safe.y
+			and x + width <= safe.x + safe.w and y + height <= safe.y + safe.h
+	end
+	local x, y = coordinates(side)
+	if not fits(x, y) then
+		local opposite = side == "before" and "after"
+			or (side == "above" and "below" or (side == "below" and "above" or "before"))
+		local oppositeX, oppositeY = coordinates(opposite)
+		if fits(oppositeX, oppositeY) then x, y = oppositeX, oppositeY end
+	end
 	x = math.max(safe.x, math.min(x, safe.x + safe.w - width))
 	y = math.max(safe.y, math.min(y, safe.y + safe.h - height))
 	if widget.setX then widget:setX(x) else widget.x = x end
@@ -362,38 +397,81 @@ local function transientPanel(options)
 	local content = options.content or {}
 	if type(content) ~= "table" then content = { text = content } end
 	local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
-	local profile = options.profile or "compact"
-	-- Explanatory BlockHeader help carries guidance rather than the short label
-	-- of an item tooltip. Give it a readable line length and only contract when
-	-- the player's safe viewport genuinely cannot provide that width.
-	local defaultWidth = profile == "informational" and 680
-		or (profile == "rail" and 280 or 320)
-	local viewportMargin = profile == "informational" and 32 or 0
+	local kind = options.kind or "descriptive"
+	-- Profile remains a compatibility geometry input only. It does not choose a
+	-- class: older compact/omitted calls stay 320 wide, informational stays 680.
+	local informational = options.profile == "informational"
+	local defaultWidth = informational and 680 or 320
+	local viewportMargin = informational and 32 or 0
 	local availableWidth = math.max(1, safe.w - viewportMargin)
 	local requestedWidth
-	if profile == "option" or profile == "rail" then
+	if kind == "brief" then
 		local text = tostring(content.text or options.text or "")
+		local font = content.font or options.font or UIFont.Small
 		local manager = type(getTextManager) == "function" and getTextManager() or nil
 		local textWidth = manager and manager.MeasureStringX
-			and manager:MeasureStringX(UIFont.Small, text) or #text * 8
-		local paddingX = math.max(0, tonumber(options.paddingX) or 8)
+			and manager:MeasureStringX(font, text) or #text * 8
+		local paddingX = math.max(0, tonumber(content.paddingX or options.paddingX) or 8)
 		requestedWidth = textWidth + paddingX * 2
 	else
 		requestedWidth = math.max(120, tonumber(options.maxWidth) or defaultWidth)
 	end
-	local width = math.max(1, math.min(requestedWidth, availableWidth))
+	-- briefTextFits has already rejected a width outside this safe rectangle;
+	-- never clamp a valid brief into a wrapped layout.
+	local width = kind == "brief" and requestedWidth
+		or math.max(1, math.min(requestedWidth, availableWidth))
 	local document = Tooltip.createDocument({ sections = { {
 		title = content.title, text = content.text or options.text,
 		tone = content.tone or options.tone, framed = false,
-		align = (profile == "option" or profile == "rail") and "right" or content.align,
+		font = content.font or options.font,
+		paddingX = content.paddingX or options.paddingX,
+		paddingY = content.paddingY or options.paddingY,
+		align = kind == "brief" and "right" or content.align,
 	} } })
 	local measured = document:measure(width)
-	local panel = ISPanel:new(0, 0, measured.width, math.min(measured.height, math.max(1, safe.h)))
+	local height = math.min(measured.height, math.max(1, safe.h))
+	local scrollable = kind == "descriptive" and measured.height > height
+	local contentRect, trackRect
+	local outerWidth = measured.width
+	local section = document.sections[1]
+	if scrollable then
+		-- Use the already-approved Scroll geometry inside the tooltip frame. Its
+		-- gutter reduces the actual text width, so measure once again before the
+		-- content height is supplied to Scroll; the Scroll region owns the one
+		-- canonical 8 px inset, so the document must not apply it twice.
+		contentRect, trackRect = SiK.UI.Metrics.blockRects(outerWidth, height, true, 0, 0)
+		section.paddingX, section.paddingY = 0, 0
+		measured = document:measure(contentRect.w)
+	end
+	local panel = ISPanel:new(0, 0, outerWidth, height)
 	panel:initialise()
 	panel._sikTooltipDocument = document
+	panel._sikTooltipSafe = { x = safe.x, y = safe.y, w = safe.w, h = safe.h }
+	panel._sikTooltipScrollable = scrollable
+	if scrollable then
+		local scroll = SiK.UI.Scroll.create({ parent = panel, viewportRect = contentRect,
+			trackRect = trackRect, contentHeight = measured.height,
+			playerNum = options.playerNum or 0 })
+		if scroll then
+			local host = SiK.UI.Scroll.childHost(scroll)
+			panel._sikTooltipScroll = scroll
+			panel._sikTooltipScrollHost = host
+			host.prerender = function(self)
+				document:render(self, 0, 0, contentRect.w,
+					{ backgroundColor = { a = 0 }, border = false })
+			end
+		else
+			-- An overflow document without its Scroll host cannot remain accessible.
+			-- Dispose the unattached partial panel and propagate a deterministic
+			-- construction failure instead of rendering outside the safe viewport.
+			document:dispose()
+			if panel.dispose then panel:dispose() end
+			return nil, "scroll_unavailable"
+		end
+	end
 	panel.prerender = function(self)
 		local frameOptions = options
-		if (profile == "option" or profile == "rail") and options.backgroundColor == nil then
+		if kind == "brief" and options.backgroundColor == nil then
 			local theme = SiK.UI.Theme.tokens(options.theme)
 			frameOptions = {
 				theme = options.theme,
@@ -404,17 +482,58 @@ local function transientPanel(options)
 			}
 		end
 		Tooltip.renderFrame(self, 0, 0, self.width, self.height, frameOptions)
-		document:render(self, 0, 0, self.width, { backgroundColor = { a = 0 }, border = false })
+		if not self._sikTooltipScrollable then
+			document:render(self, 0, 0, self.width, { backgroundColor = { a = 0 }, border = false })
+		end
 	end
 	local previousDispose = panel.dispose
 	panel.dispose = function(self)
 		if self._sikDisposed then return false end
 		self._sikDisposed = true
+		if self._sikTooltipFocus and self._sikTooltipFocus.dispose then
+			self._sikTooltipFocus:dispose()
+		end
+		if self._sikTooltipScroll and self._sikTooltipScroll.dispose then
+			self._sikTooltipScroll:dispose()
+		end
 		document:dispose()
 		if type(previousDispose) == "function" then previousDispose(self) end
 		return true
 	end
 	return panel
+end
+
+local function sameSafeRect(left, right)
+	return left and right and left.x == right.x and left.y == right.y
+		and left.w == right.w and left.h == right.h
+end
+
+local function resolveKind(options)
+	local kind = options.kind
+	if kind == "object" or kind == "brief" or kind == "descriptive" then return kind end
+	if kind ~= nil then return nil, "invalid_tooltip_kind" end
+	-- Compatibility through Framework 1.0.x only. Profiles do not infer meaning.
+	if options.profile == "option" or options.profile == "rail" then return "brief" end
+	return "descriptive"
+end
+
+local function briefTextFits(text, options, content)
+	text = tostring(text or "")
+	content = content or (type(options.content) == "table" and options.content or {})
+	if content.title ~= nil and tostring(content.title) ~= "" then
+		return nil, "brief_multiline"
+	end
+	if string.find(text, "\n", 1, true) or string.find(text, "\r", 1, true) then
+		return nil, "brief_multiline"
+	end
+	local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
+	local font = content.font or options.font or UIFont.Small
+	local manager = type(getTextManager) == "function" and getTextManager() or nil
+	local textWidth = manager and manager.MeasureStringX
+		and manager:MeasureStringX(font, text) or #text * 8
+	local paddingX = math.max(0, tonumber(content.paddingX or options.paddingX) or 8)
+	if textWidth + paddingX * 2 > safe.w then return nil, "brief_viewport_overflow" end
+	return true
 end
 
 function Tooltip.attach(control, options)
@@ -423,15 +542,35 @@ function Tooltip.attach(control, options)
 	end
 	if type(control) ~= "table" then return nil, "invalid_control" end
 	options = options or {}
+	local kind, kindReason = resolveKind(options)
+	if not kind then return nil, kindReason end
+	options.kind = kind
+	if kind == "object" then
+		if options.text ~= nil or options.tooltip ~= nil then return nil, "object_text_unsupported" end
+		if options.content ~= nil or type(options.factory) == "function" then
+			return nil, "object_content_unsupported"
+		end
+	end
 	local previousText = control.tooltip
+	local initialContent = type(options.content) == "table" and options.content or nil
 	local staticText = options.text or options.tooltip
+	if staticText == nil and initialContent then staticText = initialContent.text end
 	local composed = staticText
-	if previousText and staticText and tostring(previousText) ~= tostring(staticText) then
+	if kind == "object" then
+		-- An external object host owns its vanilla body/tooltip field. Do not
+		-- compose that field into an informational surface or lifecycle.
+		staticText, composed = nil, nil
+	elseif previousText and staticText and tostring(previousText) ~= tostring(staticText) then
 		composed = options.replace == true and staticText
 			or tostring(previousText) .. tostring(options.separator or "\n")
 				.. tostring(staticText)
 	elseif previousText and not staticText then
 		composed = previousText
+	end
+	if kind == "brief" then
+		if composed == nil then return nil, "brief_text_required" end
+		local fits, reason = briefTextFits(composed, options)
+		if not fits then return nil, reason end
 	end
 	if composed ~= nil then
 		if control.setTooltip then control:setTooltip(tostring(composed))
@@ -442,12 +581,15 @@ function Tooltip.attach(control, options)
 		if type(options.factory) ~= "function" and options.content == nil then
 			options.variant = "transient"
 			options.content = { text = tostring(composed) }
+		elseif type(options.content) == "table" then
+			options.content.text = tostring(composed)
 		end
 	end
 
 	local previousMove = control.onMouseMove
 	local previousOutside = control.onMouseMoveOutside
 	local active, activeOwned = nil, false
+	local contentDisabled = false
 	local handle = { control = control, playerNum = options.playerNum or 0 }
 	local channelKey = tostring(handle.playerNum) .. "\31" .. tostring(options.channel or "default")
 	local timeoutCallback, timeoutInstalled, expiresAt = nil, false, nil
@@ -471,7 +613,104 @@ function Tooltip.attach(control, options)
 		removeTimeout()
 	end
 
-	local function show(self, supplied)
+	local function pointerOver(widget)
+		if type(widget) ~= "table" then return false end
+		if type(widget.isMouseOver) == "function" then
+			local ok, hovered = pcall(widget.isMouseOver, widget)
+			if ok and hovered == true then return true end
+		end
+		if type(getMouseX) ~= "function" or type(getMouseY) ~= "function" then return false end
+		local x, y, width, height = controlRect(widget)
+		local mouseX, mouseY = getMouseX(), getMouseY()
+		return type(mouseX) == "number" and type(mouseY) == "number"
+			and mouseX >= x and mouseX < x + width and mouseY >= y and mouseY < y + height
+	end
+
+	local function expired()
+		return expiresAt ~= nil and transientNow(options) >= expiresAt
+	end
+
+	local show
+	local function remeasureScrollableViewport()
+		if not (activeOwned and active and active._sikTooltipScrollable) then return false end
+		local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
+		if sameSafeRect(active._sikTooltipSafe, safe) then return false end
+		disposeActive()
+		show(control)
+		return true
+	end
+
+	local function installScrollableLifecycle(panel)
+		if not panel or panel._sikTooltipScrollLifecycleInstalled then return end
+		panel._sikTooltipScrollLifecycleInstalled = true
+		local previousUpdate = panel.update
+		local function closeOutside()
+			if expired() or (not pointerOver(control) and not pointerOver(panel)) then disposeActive() end
+		end
+		panel.update = function(self, ...)
+			local result = callPrevious(previousUpdate, self, ...)
+			if self ~= active or self._sikDisposed then return result end
+			if not remeasureScrollableViewport() and expired() then disposeActive() end
+			return result
+		end
+		local function wrap(widget)
+			if not widget then return end
+			local previousMove, previousOutside = widget.onMouseMove, widget.onMouseMoveOutside
+			widget.onMouseMove = function(self, ...)
+				local result = callPrevious(previousMove, self, ...)
+				if not remeasureScrollableViewport() and expired() then disposeActive() end
+				return result
+			end
+			widget.onMouseMoveOutside = function(self, ...)
+				local result = callPrevious(previousOutside, self, ...)
+				closeOutside()
+				return result
+			end
+		end
+		-- The Scroll viewport and its bar receive pointer events directly in PZ;
+		-- retain their existing wheel/drag handlers and only add exit bookkeeping.
+		wrap(panel)
+		local scroll = panel._sikTooltipScroll
+		if scroll then
+			-- Tooltip.makePassive deliberately leaves the outer frame transparent to
+			-- pointer input. Its interactive Scroll descendants explicitly consume
+			-- their own wheel/drag events, so those events cannot fall through to
+			-- the underlying control.
+			for _, widget in ipairs({ scroll.viewport, scroll.host, scroll.bar }) do
+				if widget and widget.javaObject and widget.javaObject.setConsumeMouseEvents then
+					widget.javaObject:setConsumeMouseEvents(true)
+				end
+				wrap(widget)
+			end
+		end
+		panel._sikTooltipFocus = SiK.UI.FocusStack.install(panel, function()
+			disposeActive()
+			return true
+		end, { playerNum = handle.playerNum, priority = SiK.UI.FocusStack.PRIORITY.TRANSIENT })
+	end
+
+	show = function(self, supplied)
+		if handle.disposed then return nil, "disposed" end
+		if contentDisabled then return nil end
+		-- The viewport can change between attachment and hover (resize, UI scale or
+		-- split-screen). Recheck only at this lifecycle boundary; no polling.
+		if kind == "brief" then
+			local fits, reason = briefTextFits(composed, options)
+			if not fits then
+				disposeActive()
+				return nil, reason
+			end
+		end
+		if kind == "object" and type(supplied) ~= "table" then
+			return nil, "object_host_required"
+		end
+		-- Descriptive transients derive both wrapping width and height from the
+		-- safe player rect. Recreate only when that effective rect changed at a
+		-- real show/hover boundary; there is no resize polling.
+		if kind == "descriptive" and activeOwned and active and active._sikTooltipSafe then
+			local safe = SiK.UI.Viewport.safe(options.playerNum or 0, options.environment, 0)
+			if not sameSafeRect(active._sikTooltipSafe, safe) then disposeActive() end
+		end
 		if supplied and supplied ~= active then
 			disposeActive(); active, activeOwned = supplied, false
 		end
@@ -481,7 +720,9 @@ function Tooltip.attach(control, options)
 				local ok, value = pcall(options.factory, context)
 				if ok then active, activeOwned = value, value ~= nil end
 			elseif options.variant == "transient" and options.content then
-				active, activeOwned = transientPanel(options), true
+				local created, reason = transientPanel(options)
+				if not created then return nil, reason end
+				active, activeOwned = created, true
 			end
 			if active then Tooltip.makePassive(active) end
 		end
@@ -495,12 +736,21 @@ function Tooltip.attach(control, options)
 				active:addToUIManager(); active._sikTransientAttached = true
 			end
 			if active.setVisible then active:setVisible(true) end
-			if options.variant == "transient" then placeTransient(active, control, options)
-			else Tooltip.position(active, handle.playerNum, options.gap, options.environment) end
+			if active._sikTooltipScrollable then installScrollableLifecycle(active) end
+			-- An object host arrives with its vanilla/product layout already chosen.
+			-- Lifecycle may show/hide it, but informational pointer/control placement
+			-- must not move its body.
+			if kind ~= "object" then
+				if options.variant == "transient" then placeTransient(active, control, options)
+				else Tooltip.position(active, handle.playerNum, options.gap, options.environment) end
+			end
 			local timeoutMs = math.max(0, tonumber(options.timeoutMs) or 0)
 			if timeoutMs > 0 then
 				expiresAt = transientNow(options) + timeoutMs
-				if not timeoutInstalled and Events and Events.OnTick and Events.OnTick.Add then
+				-- A scrollable tooltip has local control/panel callbacks that check its
+				-- expiry. Do not add a global tick listener for that variant.
+				if not active._sikTooltipScrollable and not timeoutInstalled
+						and Events and Events.OnTick and Events.OnTick.Add then
 					timeoutInstalled = true; Events.OnTick.Add(timeoutCallback)
 				end
 			end
@@ -516,11 +766,15 @@ function Tooltip.attach(control, options)
 		show(self)
 		return result
 	end
-	local outsideWrapper = function(self, ...)
-		local result = callPrevious(previousOutside, self, ...)
-		disposeActive()
-		return result
-	end
+		local outsideWrapper = function(self, ...)
+			local result = callPrevious(previousOutside, self, ...)
+			if active and active._sikTooltipScrollable then
+				if expired() or not pointerOver(active) then disposeActive() end
+			else
+				disposeActive()
+			end
+			return result
+		end
         local hoverCreatesTooltip = type(options.factory) == "function"
                 or (options.variant == "transient" and options.content ~= nil)
         if hoverCreatesTooltip then
@@ -533,22 +787,78 @@ function Tooltip.attach(control, options)
 	function handle:getActive() return active end
 	function handle:reposition()
 		if not active then return nil, "not_visible" end
+		-- Object layout remains entirely with the caller-created host. Return the
+		-- active host so this lifecycle operation stays harmless and chainable.
+		if kind == "object" then return active end
 		return placeTransient(active, control, options)
 	end
-	function handle:setContent(content)
-		options.content = content
-		if activeOwned then disposeActive(); show(control) end
-		return self
+	local function copyContentWithText(content, value)
+		if value == nil then return nil end
+		local result = {}
+		if type(content) == "table" then
+			for key, entry in pairs(content) do result[key] = entry end
+		end
+		result.text = tostring(value)
+		return result
 	end
-	function handle:setText(value)
-		staticText = value
-		composed = value
+	local function sameRenderedContent(left, right)
+		if left == right then return true end
+		if type(left) ~= "table" or type(right) ~= "table" then return false end
+		for _, key in ipairs({ "text", "title", "tone", "font", "paddingX", "paddingY", "align" }) do
+			if left[key] ~= right[key] then return false end
+		end
+		return true
+	end
+	local function commitText(value, nextComposed, nextContent, refresh)
+		local changed = tostring(composed or "") ~= tostring(nextComposed or "")
+		staticText, composed = value, nextComposed
+		options.content = nextContent
+		contentDisabled = nextComposed == nil
+		if control.setTooltip then control:setTooltip(nextComposed) else control.tooltip = nextComposed end
+		if nextComposed == nil then
+			disposeActive()
+			return handle
+		end
+		if activeOwned and (changed or refresh) then
+			disposeActive()
+			show(control)
+		end
+		return handle
+	end
+	function handle:setContent(content)
+		if kind == "object" then return nil, "object_content_unsupported" end
+		local value
+		if type(content) == "table" then value = content.text else value = content end
+		local nextComposed = value
 		if previousText and value and options.replace ~= true then
-			composed = tostring(previousText) .. tostring(options.separator or "\n")
+			nextComposed = tostring(previousText) .. tostring(options.separator or "\n")
 				.. tostring(value)
 		end
-		if control.setTooltip then control:setTooltip(composed) else control.tooltip = composed end
-		return self
+		local nextContent = copyContentWithText(content, nextComposed)
+		if kind == "brief" then
+			if nextComposed ~= nil then
+				local fits, reason = briefTextFits(nextComposed, options, nextContent)
+				if not fits then return nil, reason end
+			end
+		end
+		return commitText(value, nextComposed, nextContent,
+			not sameRenderedContent(options.content, nextContent))
+	end
+	function handle:setText(value)
+		if kind == "object" then return nil, "object_text_unsupported" end
+		local nextComposed = value
+		if previousText and value and options.replace ~= true then
+			nextComposed = tostring(previousText) .. tostring(options.separator or "\n")
+				.. tostring(value)
+		end
+		local nextContent = copyContentWithText(options.content, nextComposed)
+		if kind == "brief" then
+			if nextComposed ~= nil then
+				local fits, reason = briefTextFits(nextComposed, options, nextContent)
+				if not fits then return nil, reason end
+			end
+		end
+		return commitText(value, nextComposed, nextContent)
 	end
 	function handle:dispose()
 		if self.disposed then return false end

@@ -101,6 +101,90 @@ behavior.
 
 ## Error and lifecycle convention
 
+### Tooltip classes
+
+`Tooltip.attach(control, options)` and `Controls.setTooltip(control, text,
+options)` use an explicit `kind`. Informational `brief` is one measured
+line plus padding, while `descriptive` wraps at its readable width clamped to
+the safe player viewport and derives its height from real font metrics. `brief`
+rejects embedded newlines and an unsafe measured width before it changes the
+control or installs hover handlers; callers select `descriptive` when help
+needs multiple lines. It rechecks that same measured rectangle once when it is
+shown, so a resize, UI-scale change or split-screen transition hides an active
+brief instead of overflowing; it does not poll. Neither class invokes `InventoryItem:DoTooltip` or
+creates an object-tooltip section.
+
+Informational control tooltips use safe pointer placement by default. A body or
+rail flyout must explicitly request `{ anchor = "control", side = "before" | "after" |
+"above" | "below" }`; if that side does not fit, the framework tries the
+opposite side before its final viewport clamp. Both variants resolve their final
+rectangle against the player viewport. `setText` and `setContent` validate the final displayed text,
+then keep `content.text` synchronized while preserving its visual options. An
+owned active panel is remeasured only when its displayed value or a rendered
+content option changes. A
+rejected `brief` leaves its prior control, content and panel unchanged; setting
+informational text/content to `nil` hides it and prevents a later `show()` from
+creating an empty surface. A disposed handle also cannot show again.
+
+An owned descriptive transient records the effective safe viewport used for
+its wrap. At its next show/hover boundary, it remeasures only if that rectangle
+changed, covering resize, UI-scale and split-screen transitions without polling.
+When its complete measured document exceeds the safe height, it becomes the
+approved `sik-tooltip--scrollable` variant: the normal tooltip frame contains a
+real `Scroll` viewport and scrollbar, while `Scroll.setContentHeight` receives
+the complete measured height. No line is hidden or truncated. This overflow
+variant is touching and control-adjacent, so the pointer can enter its viewport;
+its local control/panel handlers keep it alive across that union, and the wheel
+is consumed only inside the overflowing viewport. It closes on leaving both
+rectangles, timeout, disposal or Escape through `FocusStack`. It adds no
+`OnTick` handler; expiry and a changed safe viewport are checked by the
+visible panel's local `update` plus its pointer callbacks. `brief` and `object`
+retain their existing pointer and vanilla-host behavior.
+If the required `Scroll` host cannot be constructed, `show()` returns
+`nil, "scroll_unavailable"`; it creates neither a partial panel nor an Escape
+layer, and a later show can retry construction.
+`FocusStack` is the Framework implementation of the per-player EscapeStack
+contract: the scrollable panel installs one `TRANSIENT` layer for its
+`playerNum`, unregisters when hidden or removed, and its owned disposal also
+releases that layer. No second Escape stack is created for tooltips.
+
+`brief` rejects a nonempty content title too, because it would render a second
+line. A custom `factory` owns its returned widget's rendering and must preserve
+the selected kind's one-line or wrapped contract; the framework can validate
+only the textual transient surface it creates itself.
+
+`Tooltip.attach(control, { kind = "object", ... })` is only a lifecycle
+attachment for an external object-tooltip host. It accepts no `text`, `tooltip`,
+`content` or factory, creates no panel, and `handle:show(host)` requires the
+already-created host. `show(nil)` returns `nil, "object_host_required"` and
+`setText` returns `nil, "object_text_unsupported"`. This preserves the object
+body and its existing renderer/composition and position without a second wrapper.
+For an active object host, `handle:reposition()` returns that host unchanged;
+it never applies pointer or control placement.
+
+`Tooltip.objectSection(lines, options)` returns only a neutral section record
+tagged `kind="object"`, for composition after the vanilla body in an
+already-owned object-tooltip host. It creates no panel and does not wrap the
+vanilla renderer. Object descriptions remain owned by their product and use
+localized semantic line breaks when needed.
+
+Compatibility in Framework 1.0.x maps legacy `option`/`rail` profiles to
+`brief`, and `informational`, `compact`, or an omitted profile to
+`descriptive`; it emits no new trace. Profiles are not a semantic API and this
+adapter is scheduled for removal in Framework 1.1.0. New consumers must pass
+`kind`; `tooltipKind` is the equivalent property when a control constructor
+forwards a tooltip declaration. Until that removal, a legacy geometry profile
+still preserves its existing width: `informational` is 680 px and
+`compact`/omitted is 320 px unless `maxWidth` is supplied. It never selects the
+tooltip class.
+
+The declarative Builder tooltip factory forwards `data.text` or `data.content`,
+plus `data.kind`, `data.placement`, `data.profile` and `data.maxWidth`, to the
+same `Tooltip.attach(control, options)` contract. A data table without `text`
+does not become a stringified tooltip. Its legacy lazy factory remains available
+only for informational classes; `kind="object"` requires the caller-created
+host and never accepts a factory.
+
 ### Editable-field submission
 
 `Controls.field` is a padded panel with one native text child, available as
@@ -143,11 +227,35 @@ row with truncated left text and a `sik.close.18` removal control.  Options are
 its close child and exposes `reflow(width)` plus idempotent `dispose()`.
 `UI.Controls.dismissibleRowHeight(options)` returns its standard allocation.
 
+### Alert row progress
+
+`UI.Controls.alertRow(parent, options)` accepts optional
+`progress = { value, status, tone, mode }`. Without it the row creates no
+progress child. When present it uses `UI.Controls.progress` as an unlabeled
+72 x 10 px bar, right-aligned with an 8 px gap; the alert text wraps in the
+remaining rectangle. At a width where that rectangle would no longer leave
+legible text, the bar moves below the text and the row remeasures its height.
+
+`row:setAlert(spec)` creates or updates the existing bar when
+`spec.progress` is a table, and `progress = false` removes and disposes it.
+An omitted or `nil` `progress` preserves its current state. Values and
+determinate/indeterminate modes use the same normalization as
+`UI.Controls.progress`; the bar never draws a second status label. The row
+owns the child through reflow and idempotent disposal and does not install a
+timer or an `OnTick` handler.
+
+`Controls.field` exposes `onlyNumbers` and `maxLength` as read-only
+construction descriptors alongside its native entry. They describe the
+initial `numeric` and `maxLength` options; runtime input state remains on
+the native child.
+
 ### Inline child pager
 
-`UI.Table.create` keeps `pagination` as its single pagination option.  When
-`expansion` is present, it projects one inline pager row after each expanded
-parent instead of reserving a table-global footer.  The row is structural:
+`UI.Table.create` creates pagination only when its `pagination` option is
+present. With `expansion` and no pagination, every expanded child is projected
+using the normal table scroll with no pager row, height reservation or pager
+hitbox. With both options present, it projects one inline pager row after each
+expanded parent instead of reserving a table-global footer. The row is structural:
 it is not selectable, draggable, a tooltip item, a row-adapter callback or an
 object/row total.
 
@@ -160,6 +268,48 @@ return localizedText end }`.  `state` may contain `page`, `totalRows`,
 does not poll or fetch: `onPageChange` is declarative and the consumer refreshes
 the rows when its state changes.  `labelOf` owns localization and plural rules;
 without it the framework emits only a language-neutral numeric fallback.
+
+### Table row density
+
+Table rows use the effective height `max(fontHeight + 2 * rowVerticalPadding,
+nominalRowHeight, requestedRowHeight)`. The default `standard` density uses the canonical table
+tokens. `density="compact"` is the only reduced-density variant and uses its
+own `Metrics.table.compact` row-height and vertical-padding tokens. Partial
+`metrics.table.compact` overrides retain any omitted canonical token. A numeric
+`rowHeight` may increase a density, but cannot reduce its nominal or
+font-and-padding minimum; the same effective metric drives row rectangles, hit testing,
+virtualization, scrolling and intrinsic height.
+
+### Block header leading indicator
+
+The optional `block.header` capability property `leading-indicator` accepts a
+context-resolved descriptor or `nil`. Its descriptor is neutral:
+`{ icon = <assetId>, tooltip = <text>, severity = "warning" }`. The Block
+passes the descriptor to its header, where the control owns its leading icon,
+tooltip, geometry and removal of any reserved space when the descriptor becomes
+`nil`. A surface update may change the descriptor without remounting the Block.
+
+Blocks may directly contain Blocks. Each Block remains a geometry boundary: its
+own header, canonical padding and optional scrollbar reservation apply only to
+its descendants, with no consumer-side reservation or compensation.
+
+### Header operation
+
+`UI.Controls.headerOperation` reserves a 10 px progress bar and the canonical
+control gap before it. Its label is measured, UTF-8-truncated and clipped to
+the rectangle before that gap; after `reflow`, the bar remains right-aligned.
+`setOperation({ showProgress = false })` hides the bar and returns its width to
+the label for an idle or completed operation.
+
+### Wrapped semantic status
+
+`UI.Controls.status(parent, { wrap = true, text, tone, indicator?, framed?, w })`
+measures complete text and derives its height after every `setStatus` or
+`reflow(width)`. `indicator = true` uses the shared 8 px semantic state marker
+with a 16 px leading reservation. `framed = true` uses the compact bordered
+status row with padding 10 px horizontally and 6 px vertically, minimum height
+30 px. Neither variant truncates text or changes its semantic class by length.
+Existing status constructors without `wrap` retain their behavior.
 
 Constructors return `instance` on success, or `nil, reason` for invalid inputs
 or unsupported setup. Mutators return their instance/value on success, or
