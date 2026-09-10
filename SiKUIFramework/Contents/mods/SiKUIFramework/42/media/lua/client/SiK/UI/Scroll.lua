@@ -2,6 +2,7 @@ require "SiK/UI/Namespace"
 require "ISUI/ISPanel"
 require "SiK/UI/Layout"
 require "SiK/UI/Metrics"
+require "SiK/UI/Theme"
 
 SiK = SiK or {}
 SiK.UI = SiK.UI or {}
@@ -44,6 +45,16 @@ local function containsChild(parent, child)
                 if children[index] == child then return true end
         end
         return false
+end
+
+local function inheritedValue(parent, field)
+	local depth = 0
+	while type(parent) == "table" and depth < 64 do
+		if type(parent[field]) == "table" then return parent[field] end
+		parent = parent.parent
+		depth = depth + 1
+	end
+	return nil
 end
 
 local function thumbRect(scroll)
@@ -184,8 +195,14 @@ function ScrollInstance:restoreState(state)
 end
 
 function ScrollInstance:addChild(child)
-        if self.disposed or not child then return nil, "invalid_child" end
-        if not containsChild(self.host, child) then attach(self.host, child) end
+	if self.disposed or not child then return nil, "invalid_child" end
+	local attached = containsChild(self.host, child)
+	if not attached then
+		attach(self.host, child)
+		if type(child._sikRebindThemeParent) == "function" then
+			child:_sikRebindThemeParent(self.host)
+		end
+	end
         for index = 1, #self.children do
                 if self.children[index] == child then return child end
         end
@@ -272,6 +289,17 @@ local function createInstance(options)
 	attach(options.parent, viewport)
 	attach(viewport, host)
 	attach(options.parent, bar)
+	local inheritedContext = inheritedValue(options.parent, "_sikThemeContext")
+	local inheritedMaterial = inheritedValue(options.parent, "_sikMaterial")
+	viewport._sikThemeContext, host._sikThemeContext, bar._sikThemeContext =
+		inheritedContext, inheritedContext, inheritedContext
+	viewport._sikMaterial, host._sikMaterial, bar._sikMaterial =
+		inheritedMaterial, inheritedMaterial, inheritedMaterial
+	local inheritedPlayer = tonumber(options.playerNum)
+		or tonumber(options.parent.playerNum)
+		or (inheritedContext and tonumber(inheritedContext.playerNum)) or 0
+	viewport.playerNum, host.playerNum, bar.playerNum =
+		inheritedPlayer, inheritedPlayer, inheritedPlayer
 	local instance = setmetatable({
 		parent = options.parent,
 		viewport = viewport,

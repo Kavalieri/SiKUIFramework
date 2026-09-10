@@ -214,7 +214,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.4`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.5`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
@@ -338,6 +338,9 @@ of the child. Attach and resize the panel, not its text backend. The SiK panel
 owns the complete visible surface and semantic border. The native child keeps
 only text, caret, selection, IME and keyboard behaviour; both its Lua chrome
 flags and its `UITextBox2` frame are disabled after instantiation.
+The semantic border reacts to hover and uses the current palette accent while
+focused. This behaviour is standard; pass `statefulChrome=false` only for a
+deliberately static field.
 
 `UI.Controls.field(parent, { onSubmit = callback })` invokes the optional
 callback only for that field's Enter submission, using the standard context
@@ -382,6 +385,10 @@ case mapping, with no pattern interpretation or queries. UTF-8/CJK names remain
 literal. Closing and reopening clears the query and rebuilds the visible list.
 
 The closed selector and popup are framework-owned panels, not an `ISComboBox`.
+Fields and combos built before their scroll host exists are reconnected by
+`UI.Scroll.addChild`: the structural host inherits the nearest player theme and
+material, and the attached control recomputes its composed material. Consumers
+do not need local colour or alpha patches for this compatibility path.
 Their palette-aware material uses the neutral SiK border at rest and the accent
 border for an active selection/open popup; error state uses the danger token.
 The detached popup resolves its own capped material and does not inherit the

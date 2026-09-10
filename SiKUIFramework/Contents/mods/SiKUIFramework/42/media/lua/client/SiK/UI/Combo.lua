@@ -215,6 +215,8 @@ end
 
 function Combo.create(options)
 	options = options or {}
+	local themeSource = options.theme
+	if options.themeSourceSet == true then themeSource = options.themeSource end
 	local context = resolveContext(options)
 	local panel = ISPanel:new(n(options.x, 0), n(options.y, 0),
 		math.max(1, n(options.w or options.width, 160)),
@@ -230,11 +232,21 @@ function Combo.create(options)
 	panel._sikUiComponent = "combo"
 	panel._sikThemeContext = options.theme
 	panel._sikMaterial = resolveMaterial("control", options.parent, options)
-	if type(context) == "table" and context._sikThemeContext == true then
-		SiK.UI.Theme.bind(panel, context, function(widget, liveContext)
+	local function applyComboTheme(widget, liveContext)
 			widget._sikThemeContext = liveContext
 			widget._sikMaterial = resolveMaterial("control", options.parent, options)
-		end)
+	end
+	if type(context) == "table" and context._sikThemeContext == true then
+		SiK.UI.Theme.bind(panel, context, applyComboTheme)
+	end
+	function panel:_sikRebindThemeParent(nextParent)
+		options.parent = nextParent
+		local playerNum = options.playerNum or (nextParent and nextParent.playerNum) or self.playerNum
+		local nextContext, reason = SiK.UI.Theme.context(nextParent, themeSource, playerNum)
+		if not nextContext then return nil, reason end
+		options.theme = nextContext
+		self.playerNum = math.max(0, math.floor(n(playerNum, 0)))
+		return SiK.UI.Theme.bind(self, nextContext, applyComboTheme)
 	end
 
 	function panel:prerender()

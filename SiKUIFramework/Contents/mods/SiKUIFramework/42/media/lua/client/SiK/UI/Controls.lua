@@ -39,6 +39,10 @@ local function controlArgs(parent, options)
 	end
 	options = options or {}
 	local supplied = options.theme
+	if options._sikThemeSourceSet ~= true then
+		options._sikThemeSource = supplied
+		options._sikThemeSourceSet = true
+	end
 	local context = type(supplied) == "table" and supplied._sikThemeContext == true
 		and supplied or SiK.UI.Theme.context(parent, supplied, options.playerNum)
 	-- A malformed legacy map still follows the former token fallback. Valid maps
@@ -436,6 +440,10 @@ end
 --- framework remains the single owner of colors and interaction states.
 function Controls.styleField(entry, options)
 	if type(entry) ~= "table" then return nil, "invalid_field" end
+	-- Controls.field already owns complete SiK chrome and a live material
+	-- binding. Re-styling that wrapper as a legacy native entry would replace
+	-- its binding and stop material inheritance on palette changes.
+	if entry._sikUiControl == "field" and entry.entry and entry._sikMaterial then return entry end
 	options = options or {}
 	local parent = entry.parent
 	local supplied = options.theme
@@ -468,6 +476,9 @@ end
 --- must be instantiated with product-owned target/callback signatures.
 function Controls.styleCombo(combo, options)
 	if type(combo) ~= "table" then return nil, "invalid_combo" end
+	-- Combo.create is a framework-painted panel. Legacy decoration is only for
+	-- external native combos and must not replace the panel's material binding.
+	if combo._sikUiComponent == "combo" and combo._sikMaterial then return combo end
 	options = options or {}
 	local parent = combo.parent
 	local supplied = options.theme
@@ -840,16 +851,17 @@ function Controls.field(parent, options)
 				local material = self._sikMaterial
 				local fill = material and material.paint or theme.surfaceAlt
 				local tone = fill
+				local stateful = options.statefulChrome ~= false
 				if not enabled then tone = theme.background
-				elseif options.statefulChrome and focused then tone = theme.surfaceAlt
-				elseif options.statefulChrome and hovered then tone = theme.hover end
+				elseif stateful and focused then tone = theme.surfaceAlt
+				elseif stateful and hovered then tone = theme.hover end
 				-- State changes select the colour, while the composed material keeps
 				-- ownership of alpha. Focus must not make the control suddenly more
 				-- transparent, and disabled fields must not become opaque panels.
 				self:drawRect(0, 0, self.width, self.height, fill.a, tone.r, tone.g, tone.b)
 				local error = options.error == true or options.state == "error"
 				local border = error and theme.danger
-					or (options.statefulChrome and focused and theme.accent or theme.border)
+					or (stateful and focused and theme.accent or theme.border)
                 self:drawRectBorder(0, 0, self.width, self.height, border.a,
                         border.r, border.g, border.b)
                 ISPanel.prerender(self)
@@ -995,7 +1007,7 @@ function Controls.field(parent, options)
                 return reflow(self)
         end
         decorate(field, "field", options)
-	bindTheme(field, options, function(widget)
+	local function applyFieldTheme(widget)
 		widget._sikThemeContext = options.theme
 		widget._sikMaterial = SiK.UI.Theme.resolveMaterial("control", parent,
 			options.material, options.theme)
@@ -1006,10 +1018,21 @@ function Controls.field(parent, options)
 		if widget.trailingAction then
 			widget.trailingAction:setIconTint(live.textMuted)
 		end
-	end)
+	end
+	bindTheme(field, options, applyFieldTheme)
 	if not field._sikMaterial then
 		field._sikMaterial = SiK.UI.Theme.resolveMaterial("control", parent,
 			options.material, options.theme)
+	end
+	function field:_sikRebindThemeParent(nextParent)
+		parent = nextParent
+		local playerNum = options.playerNum or (nextParent and nextParent.playerNum) or self.playerNum
+		local context, reason = SiK.UI.Theme.context(nextParent,
+			options._sikThemeSource, playerNum)
+		if not context then return nil, reason end
+		options.theme = context
+		self.playerNum = math.max(0, math.floor(n(playerNum, 0)))
+		return SiK.UI.Theme.bind(self, context, applyFieldTheme)
 	end
         local fieldDispose = field.dispose
         field.dispose = function(self)
@@ -1034,6 +1057,7 @@ function Controls.combo(parent, options)
 		w = math.max(1, n(options.w or options.width, 160)),
 		h = math.max(1, n(options.h or options.height, Controls.metrics(options.profile).inputHeight)),
 		parent = parent, playerNum = options.playerNum, theme = options.theme,
+		themeSource = options._sikThemeSource, themeSourceSet = true,
 		material = options.material, enabled = options.enabled,
 		maxVisibleRows = options.maxVisibleRows, searchable = options.searchable == true,
 		searchPlaceholder = options.searchPlaceholder, placeholder = options.placeholder,
@@ -1042,7 +1066,6 @@ function Controls.combo(parent, options)
 		end,
 	})
 	decorate(combo, "combo", options)
-	bindTheme(combo, options)
 	combo:setItems(options.items or options.options or {}, options.selected)
 	combo:setEnabled(options.enabled ~= false)
 	return attach(parent, combo)
