@@ -400,8 +400,14 @@ function Window.resolveInitialPosition(options, bounds)
 	local compact = options.profile == "compact"
 	local shifted = { x = bounds.x + (compact and 32 or 54),
 		y = bounds.y + (compact and 32 or 48), w = bounds.w, h = bounds.h }
-	local clamped = SiK.UI.Viewport.clamp(shifted, bounds.playerNum, options.environment,
-		n(options.safeMargin, SiK.UI.Metrics.safeMargin))
+	local closeWidth = math.max(20, n(options.closeSize, 32))
+	if options.closable == false or options.close == false then closeWidth = 0 end
+	local clamped = SiK.UI.Viewport.clampAccessible(shifted, bounds.playerNum,
+		options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
+			headerHeight = n(options.headerHeight, 52),
+			headerWidth = n(options.headerReachWidth, 96),
+			padding = n(options.padding, 12), closeWidth = closeWidth,
+		})
 	for key, value in pairs(bounds) do if clamped[key] == nil then clamped[key] = value end end
 	return clamped
 end
@@ -711,6 +717,14 @@ function Window.reflow(panel)
 	return panel
 end
 
+local function activateWindow(panel)
+	if panel.bringToTop then panel:bringToTop() end
+	if SiK.UI.Modal and SiK.UI.Modal.raiseOwned then
+		SiK.UI.Modal.raiseOwned(panel)
+	end
+	SiK.UI.FocusStack.activate(panel, panel.playerNum)
+end
+
 local function installPointerHandlers(panel)
 	local options = panel._sikWindowOptions
 	local previousDown, previousMove = panel.onMouseDown, panel.onMouseMove
@@ -770,8 +784,7 @@ local function installPointerHandlers(panel)
 		return true
 	end
 	local downWrapper = function(self, x, y, ...)
-		if self.bringToTop then self:bringToTop() end
-		SiK.UI.FocusStack.activate(self, self.playerNum)
+		activateWindow(self)
 		local gx, gy = globalPointer()
 		-- Keep the painted corner compact while exposing a more forgiving input
 		-- target. Consumers may tune it independently through resizeHitSize.
@@ -1154,9 +1167,8 @@ function Window.apply(panel, options)
 	function panel:show()
 		if self.addToUIManager then self:addToUIManager() end
 		if self.setVisible then self:setVisible(true) end
-		if self.bringToTop then self:bringToTop() end
 		liveWindows[self] = true
-		SiK.UI.FocusStack.activate(self, self.playerNum)
+		activateWindow(self)
 		return self
 	end
 	function panel:hide()

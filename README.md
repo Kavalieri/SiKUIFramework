@@ -14,6 +14,9 @@ and load `SiKUIFramework` before its consumers. A consuming `mod.info` uses
 `require=SiKUIFramework`; client UI code loads `SiK_UI` and consumes only
 the documented public modules.
 
+The sole public Lua entrypoint is `require "SiK_UI"`; paths below `SiK/UI/`
+are implementation modules and are not consumer imports.
+
 Start with the [runtime reference](docs/RUNTIME_REFERENCE.md), [public API](docs/SIK_UI_API.md),
 [component catalog](docs/SIK_UI_COMPONENT_CATALOG.md), [window contract](docs/WINDOW.md)
 and [tabs contract](docs/TABS.md).

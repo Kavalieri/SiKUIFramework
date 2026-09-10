@@ -227,7 +227,15 @@ function Diagnostics.checkContainment(root, label, options)
 				local childRect = rect(child)
 				local scrollOverflow = parent._sikScrollViewport == true
 					and child._sikScrollContentHost == true
-				local escapes = not scrollOverflow and childRect.w > 0 and childRect.h > 0
+				-- ISTextEntryBox adjusts its native text backend by the font inset at
+				-- runtime. B42 exposes that backend as an ISPanel child whose reported
+				-- local Y may extend beyond the wrapper even though the SiK field owns
+				-- and clips the final chrome. It is an implementation detail of the
+				-- canonical field, not a consumer containment failure.
+				local nativeFieldBackend = parent._sikUiControl == "field"
+					and parent.entry == child
+				local escapes = not scrollOverflow and not nativeFieldBackend
+					and childRect.w > 0 and childRect.h > 0
 					and (childRect.x < -tolerance or childRect.y < -tolerance
 						or childRect.x + childRect.w > parentRect.w + tolerance
 						or childRect.y + childRect.h > parentRect.h + tolerance)

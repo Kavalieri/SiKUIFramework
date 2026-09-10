@@ -77,15 +77,10 @@ local function bindOwner(panel, owner)
 	if type(panel) ~= "table" or type(owner) ~= "table" or panel == owner then return false end
 	local binding = ownerBindings[owner]
 	if not binding then
-		binding = { owner = owner, children = {}, originalBringToTop = owner.bringToTop }
-		if type(binding.originalBringToTop) == "function" then
-			binding.bringToTop = function(target, ...)
-				local result = binding.originalBringToTop(target, ...)
-				Modal.raiseOwned(target)
-				return result
-			end
-			owner.bringToTop = binding.bringToTop
-		end
+		-- Ownership is lifecycle state, not a reason to replace native methods on
+		-- the parent. Window activation raises owned descendants explicitly, which
+		-- keeps other mods and product wrappers in the original call chain.
+		binding = { owner = owner, children = {} }
 		ownerBindings[owner] = binding
 	end
 	for index = 1, #binding.children do
@@ -104,9 +99,6 @@ unbindOwner = function(panel)
 		if binding.children[index] == panel then table.remove(binding.children, index) end
 	end
 	if #binding.children == 0 then
-		if binding.bringToTop and owner.bringToTop == binding.bringToTop then
-			owner.bringToTop = binding.originalBringToTop
-		end
 		ownerBindings[owner] = nil
 	end
 	panel._sikModalOwner = nil
@@ -122,11 +114,12 @@ end
 
 function Modal.raiseOwner(owner)
 	if not owner then return false end
+	local raised = false
 	if owner.bringToTop then
 		owner:bringToTop()
-		return true
+		raised = true
 	end
-	return Modal.raiseOwned(owner)
+	return Modal.raiseOwned(owner) or raised
 end
 
 local function restoreOwnerFocus(owner)

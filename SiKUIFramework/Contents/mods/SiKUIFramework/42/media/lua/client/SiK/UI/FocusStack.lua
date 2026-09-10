@@ -79,12 +79,13 @@ function FocusStack.top(playerNum)
 	if not stack then return nil end
 	for index = 1, #stack do
 		local layer = stack[index]
-		-- Bands describe the semantic close order.  Opening or activating a layer
-		-- only makes it the newest member of its own band, so a transient cannot
-		-- be displaced by a later terminal or staff window.
+		-- The last opened or explicitly activated visible layer owns focus and
+		-- Escape. Priority only resolves the impossible equal-sequence case. This
+		-- lets a secondary window return to the front after the main terminal was
+		-- clicked, while modal ownership still prevents clicks reaching its owner.
 		if isVisible(layer) and (not best
-			or layer.priority > best.priority
-			or (layer.priority == best.priority and layer.sequence > best.sequence)) then
+			or layer.sequence > best.sequence
+			or (layer.sequence == best.sequence and layer.priority > best.priority)) then
 			best = layer
 		end
 	end
