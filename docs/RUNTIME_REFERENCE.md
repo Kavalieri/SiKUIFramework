@@ -19,7 +19,7 @@ matrix. No visual constructor is shared or server-side.
 The framework currently has two independent version axes:
 
 - `SiK.UI.Version.string()` and `mod.info` report the runtime/mod version
-  `1.0.2-dev1.3`.
+  `1.0.2-dev1.4`.
 - The catalog manifest reports `manifestVersion=0.1.0-preview`. Generated
   surface `frameworkRef.manifestVersion` pins this manifest contract, not the
   runtime/mod release number.
@@ -128,6 +128,12 @@ tables and local callbacks. A header accepts `productName`, `contextName`,
 `separator`, `status`, `statusPlacement`, `statusDot` and `close`. A footer
 accepts `items`/`versions`, `align`, `visible`, `insetLeft`,
 `expandWhenTight` and `separator`.
+
+Window chrome uses a translucent `.80` source material. Its existing local
+hover hit-test selects four attention levels for active-hover, active-idle,
+inactive-hover and inactive-idle windows without a new event or polling loop.
+Only the active window draws the accent focus frame. The versions footer paints
+text directly on that material and adds no band, divider or inner frame.
 
 ```lua
 local panel, err = SiK.UI.Window.create({
@@ -361,8 +367,14 @@ the control itself.
 
 `field.textInset` reserves the same horizontal distance on the left and right of
 the native text rectangle (default: `Controls.metrics(profile).controlGap`).
-The field container owns its chrome; the unmodified `ISTextEntryBox` child owns
-text, placeholder, caret and selection, so all four share that exact rectangle.
+The field container owns all visible chrome, including its translucent material
+and neutral/accent/danger border. Its `ISTextEntryBox` child owns text,
+placeholder, caret, selection, IME and keyboard behaviour in that exact
+rectangle, but its Lua background/border and native `UITextBox2` frame are
+suppressed after instantiation. `Controls.combo` is wholly framework-drawn and
+its searchable popup uses the detached `popover` material. Repeating ordinary
+Blocks shares one structural surface base instead of accumulating opacity;
+table Blocks retain their separate opaque palette.
 
 `panel` is a general-purpose visual container. It is transparent unless the
 consumer explicitly enables and supplies its chrome. `separator` is the

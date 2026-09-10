@@ -274,12 +274,26 @@ end
 -- Window chrome is layered source material. `paint` is the one colour a
 -- renderer draws at this node; `effective` is bookkeeping for descendants.
 Theme.materialDefaults = Theme.materialDefaults or {
-	window = { token = "background", alpha = 0.86 },
+	window = { token = "background", alpha = 0.80 },
 	header = { token = "header", alpha = 0.20 },
 	footer = { token = "header", alpha = 0.20 },
-	surface = { token = "surface", alpha = 0.13 },
-	surfaceAlt = { token = "surfaceAlt", alpha = 0.18 },
-	control = { token = "surfaceAlt", alpha = 0.88 },
+	-- Structural surfaces share the nearest non-surface base.  A Block inside
+	-- another Block therefore retains one translucent layer instead of becoming
+	-- darker at every nesting level.  Tables use their deliberate opaque palette
+	-- directly and never resolve either role.
+	surface = { token = "surface", alpha = 0.13, stableSurfaceBase = true,
+		maxEffectiveAlpha = 0.84 },
+	surfaceAlt = { token = "surfaceAlt", alpha = 0.18, stableSurfaceBase = true,
+		maxEffectiveAlpha = 0.86 },
+	-- Popovers are detached from their owner in UIManager. They visually sit
+	-- over the window, not over the owner control's already-composed paint.
+	popover = { token = "surfaceAlt", alpha = 0.72, stableSurfaceBase = true,
+		detachedSurfaceBase = true, maxEffectiveAlpha = 0.92 },
+	-- Controls may sit on the translucent window shell.  Cap their composed
+	-- alpha so the source layer remains visible without turning that stack into
+	-- a second opaque panel.  Explicit role overrides still select the colour;
+	-- the cap only prevents a further source-over accumulation.
+	control = { token = "surfaceAlt", alpha = 0.88, maxEffectiveAlpha = 0.92 },
 }
 
 local function materialParent(parent)
@@ -318,16 +332,39 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 		paint.b = channel(override.b or override[3], paint.b)
 		paint.a = channel(override.a or override[4], paint.a)
 	end
-	local base = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
-	local alpha = paint.a + base.a * (1 - paint.a)
+	local surfaceBase = spec.stableSurfaceBase and inherited and inherited.surfaceBase
+	local actualBase = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
+	if spec.detachedSurfaceBase and surfaceBase then actualBase = surfaceBase end
+	if surfaceBase then
+		-- `surfaceBase` describes the desired alpha, while the immediate parent is
+		-- the real backdrop PZ has already painted. Derive only the delta needed
+		-- to reach the target; using surfaceBase itself as the compositor would
+		-- make nested Blocks darken despite their bookkeeping descriptor.
+		local targetAlpha = paint.a + surfaceBase.a * (1 - paint.a)
+		if spec.maxEffectiveAlpha then targetAlpha = math.min(targetAlpha, spec.maxEffectiveAlpha) end
+		if targetAlpha > actualBase.a then
+			paint.a = (targetAlpha - actualBase.a) / math.max(0.0001, 1 - actualBase.a)
+		else
+			paint.a = 0
+		end
+	elseif spec.maxEffectiveAlpha and actualBase.a < spec.maxEffectiveAlpha then
+		local allowed = (spec.maxEffectiveAlpha - actualBase.a) / math.max(0.0001, 1 - actualBase.a)
+		paint.a = math.min(paint.a, math.max(0, allowed))
+	elseif spec.maxEffectiveAlpha and actualBase.a >= spec.maxEffectiveAlpha then
+		paint.a = 0
+	end
+	local alpha = paint.a + actualBase.a * (1 - paint.a)
 	local sourceWeight = alpha > 0 and paint.a / alpha or 0
-	local baseWeight = alpha > 0 and base.a * (1 - paint.a) / alpha or 0
-	return { role = role, paint = paint, effective = {
-		r = paint.r * sourceWeight + base.r * baseWeight,
-		g = paint.g * sourceWeight + base.g * baseWeight,
-		b = paint.b * sourceWeight + base.b * baseWeight,
+	local baseWeight = alpha > 0 and actualBase.a * (1 - paint.a) / alpha or 0
+	local effective = {
+		r = paint.r * sourceWeight + actualBase.r * baseWeight,
+		g = paint.g * sourceWeight + actualBase.g * baseWeight,
+		b = paint.b * sourceWeight + actualBase.b * baseWeight,
 		a = alpha,
-	} }
+	}
+	return { role = role, paint = paint, effective = effective,
+		surfaceBase = spec.stableSurfaceBase and cloneColor(surfaceBase or actualBase)
+			or (inherited and cloneColor(inherited.surfaceBase)) or cloneColor(effective) }
 end
 
 return Theme

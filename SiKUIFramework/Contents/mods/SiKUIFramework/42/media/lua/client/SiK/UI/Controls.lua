@@ -451,6 +451,9 @@ function Controls.styleField(entry, options)
 		b = theme.text.b, a = theme.text.a }
 	entry._sikUiControl = "field"
 	entry._sikUiInputStyled = true
+	-- A styled standalone entry still owns its native surface.  It must not
+	-- inherit ISPanel's hard border flag from a caller.
+	entry.drawBorder = false
 	bindTheme(entry, options, function(widget)
 		local live = SiK.UI.Theme.tokens(options.theme)
 		widget.backgroundColor = { r = live.surface.r, g = live.surface.g, b = live.surface.b, a = 0.88 }
@@ -807,14 +810,26 @@ function Controls.field(parent, options)
         field._sikTrailingInset = trailingInset
         field._sikTrailingVisible = options.trailingActionVisible == true
         field._sikUiControl = "field"
-        local entry = ISTextEntryBox:new(tostring(options.text or ""), leadingInset, 0,
-                math.max(1, field.width - leadingInset - trailingInset), field.height)
-        entry:initialise()
+	local entry = ISTextEntryBox:new(tostring(options.text or ""), leadingInset, 0,
+		math.max(1, field.width - leadingInset - trailingInset), field.height)
+	entry:initialise()
+	-- The wrapper paints the SiK surface.  These flags cover the ISPanel path
+	-- used by B42 before the native text object renders its caret and selection.
+	entry.drawBackground = false
+	entry.drawBorder = false
 	-- ISTextEntryBox:setEditable delegates to its Java text box.  Project
 	-- Zomboid only creates that object from instantiate(), not initialise().
 	-- Controls.field applies its initial enabled state before it is attached, so
 	-- the framework must complete the vanilla lifecycle here.
 	if entry.instantiate then entry:instantiate() end
+	-- B42's native UITextBox2 owns a separate frame.  Colour tables alone do
+	-- not disable it, so suppress that Java chrome after instantiate while
+	-- leaving the text backend (caret, selection, IME and keyboard) untouched.
+	local native = entry.javaObject
+	if native then
+		if type(native.setHasFrame) == "function" then pcall(native.setHasFrame, native, false) end
+		if type(native.setFrameAlpha) == "function" then pcall(native.setFrameAlpha, native, 0) end
+	end
         field.prerender = function(self)
                 local theme = SiK.UI.Theme.tokens(options.theme)
                 local enabled = options.enabled ~= false
@@ -822,12 +837,19 @@ function Controls.field(parent, options)
                         and self.entry:isFocused())
                         or self.entry.focused == true)
                 local hovered = self.isMouseOver and self:isMouseOver()
-                local fill = not enabled and theme.background
-                        or (options.statefulChrome and (focused and theme.surfaceAlt
-                                or (hovered and theme.hover or theme.surface)))
-                        or theme.surface
-                self:drawRect(0, 0, self.width, self.height, 0.88, fill.r, fill.g, fill.b)
-                local border = options.statefulChrome and focused and theme.accent or theme.border
+				local material = self._sikMaterial
+				local fill = material and material.paint or theme.surfaceAlt
+				local tone = fill
+				if not enabled then tone = theme.background
+				elseif options.statefulChrome and focused then tone = theme.surfaceAlt
+				elseif options.statefulChrome and hovered then tone = theme.hover end
+				-- State changes select the colour, while the composed material keeps
+				-- ownership of alpha. Focus must not make the control suddenly more
+				-- transparent, and disabled fields must not become opaque panels.
+				self:drawRect(0, 0, self.width, self.height, fill.a, tone.r, tone.g, tone.b)
+				local error = options.error == true or options.state == "error"
+				local border = error and theme.danger
+					or (options.statefulChrome and focused and theme.accent or theme.border)
                 self:drawRectBorder(0, 0, self.width, self.height, border.a,
                         border.r, border.g, border.b)
                 ISPanel.prerender(self)
@@ -839,8 +861,10 @@ function Controls.field(parent, options)
                 -- The native text rectangle is already inset before this runs, so its
                 -- placeholder, caret and selection all use the same symmetric bounds.
                 local theme = SiK.UI.Theme.tokens(options.theme)
-                self.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-                self.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+		self.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+		self.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+		self.drawBackground = false
+		self.drawBorder = false
                 self.textColor = { r = theme.text.r, g = theme.text.g,
 			b = theme.text.b, a = theme.text.a }
 		if type(basePrerender) == "function" then return basePrerender(self) end
@@ -973,6 +997,8 @@ function Controls.field(parent, options)
         decorate(field, "field", options)
 	bindTheme(field, options, function(widget)
 		widget._sikThemeContext = options.theme
+		widget._sikMaterial = SiK.UI.Theme.resolveMaterial("control", parent,
+			options.material, options.theme)
 		local live = SiK.UI.Theme.tokens(options.theme)
 		if widget.entry then
 			widget.entry.textColor = { r = live.text.r, g = live.text.g, b = live.text.b, a = live.text.a }
@@ -981,6 +1007,10 @@ function Controls.field(parent, options)
 			widget.trailingAction:setIconTint(live.textMuted)
 		end
 	end)
+	if not field._sikMaterial then
+		field._sikMaterial = SiK.UI.Theme.resolveMaterial("control", parent,
+			options.material, options.theme)
+	end
         local fieldDispose = field.dispose
         field.dispose = function(self)
                 if self.leadingIcon then self.leadingIcon:dispose(); self.leadingIcon = nil end
@@ -1003,7 +1033,8 @@ function Controls.combo(parent, options)
 		x = n(options.x, 0), y = n(options.y, 0),
 		w = math.max(1, n(options.w or options.width, 160)),
 		h = math.max(1, n(options.h or options.height, Controls.metrics(options.profile).inputHeight)),
-		playerNum = options.playerNum, theme = options.theme, enabled = options.enabled,
+		parent = parent, playerNum = options.playerNum, theme = options.theme,
+		material = options.material, enabled = options.enabled,
 		maxVisibleRows = options.maxVisibleRows, searchable = options.searchable == true,
 		searchPlaceholder = options.searchPlaceholder, placeholder = options.placeholder,
 		onChange = function(component, item)

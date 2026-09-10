@@ -547,6 +547,20 @@ local function applyWindowTheme(panel, context)
 	panel._sikFooterMaterial = material("footer", panel._sikMaterial)
 end
 
+local function attentionAlpha(panel)
+	local active = SiK.UI.FocusStack.activeWindow(panel.playerNum) == panel
+	local hovered = panel._sikWindowHovered == true
+	-- This is a local hit-test in the panel's existing render path, not a
+	-- listener or global poll. It covers child controls which receive pointer
+	-- movement before their window shell does.
+	if type(panel.isMouseOver) == "function" then
+		local ok, mouseOver = pcall(panel.isMouseOver, panel)
+		if ok and mouseOver then hovered = true end
+	end
+	if active then return hovered and 1 or 0.94 end
+	return hovered and 0.90 or 0.82
+end
+
 function Window.render(panel, phase)
 	if type(panel) ~= "table" or type(panel._sikWindowOptions) ~= "table" then
 		return nil, "not_applied"
@@ -559,7 +573,7 @@ function Window.render(panel, phase)
 	local theme = panel._sikThemeColors or SiK.UI.Theme.tokens(panel._sikWindowOptions.theme)
 	local material = panel._sikMaterial
 	local headerMaterial = panel._sikHeaderMaterial
-	local footerMaterial = panel._sikFooterMaterial
+	local attendedAlpha = attentionAlpha(panel)
 	if phase ~= "foreground" then
 		if SiK.UI.FocusStack.activeWindow(panel.playerNum) == panel then
 			-- An outer shadow must not darken the translucent window interior.
@@ -569,10 +583,12 @@ function Window.render(panel, phase)
 				0.46, 0, 0, 0)
 		end
 		local paint = material and material.paint or theme.background
-		panel:drawRect(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h, paint.a,
+		panel:drawRect(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h,
+			paint.a * attendedAlpha,
 			paint.r, paint.g, paint.b)
 		paint = headerMaterial and headerMaterial.paint or theme.header
-		panel:drawRect(rects.header.x, rects.header.y, rects.header.w, rects.header.h, paint.a,
+		panel:drawRect(rects.header.x, rects.header.y, rects.header.w, rects.header.h,
+			paint.a * attendedAlpha,
 			paint.r, paint.g, paint.b)
 		local edge = panel._sikWindowOptions.accentEdge
 		if edge then
@@ -594,12 +610,9 @@ function Window.render(panel, phase)
 	end
 	if phase ~= "foreground" and rects.footer.h > 0 and panel._sikFooterText ~= "" then
 		local color = SiK.UI.Theme.color("textMuted", panel._sikWindowOptions.theme)
-		local y = rects.footer.y
-		local footerPaint = footerMaterial and footerMaterial.paint or theme.header
-		panel:drawRect(rects.footerBand.x, y, rects.footerBand.w, rects.footerBand.h, footerPaint.a,
-			footerPaint.r, footerPaint.g, footerPaint.b)
-		panel:drawRect(rects.footerBand.x, y, rects.footerBand.w, 1, theme.border.a,
-			theme.border.r, theme.border.g, theme.border.b)
+		-- The footer is a text baseline and passive tooltip hitbox, not a second
+		-- container. The window material behind it remains visible without a band
+		-- fill or divider that could read as an inset black rectangle.
 		local footerFont = panel._sikFooterFont or UIFont.Small
 		local footerText = fitText(panel._sikFooterText, rects.footer.w, footerFont)
 		local x, textY = SiK.UI.Controls.textPosition(rects.footer, footerText, {
@@ -792,6 +805,7 @@ local function installPointerHandlers(panel)
 		return true
 	end
 	local downWrapper = function(self, x, y, ...)
+		self._sikWindowHovered = true
 		activateWindow(self)
 		local gx, gy = globalPointer()
 		-- Keep the painted corner compact while exposing a more forgiving input
@@ -813,11 +827,13 @@ local function installPointerHandlers(panel)
 		return type(previousDown) == "function" and previousDown(self, x, y, ...) or nil
 	end
 	local moveWrapper = function(self, ...)
+		self._sikWindowHovered = true
 		local result = type(previousMove) == "function" and previousMove(self, ...) or nil
 		if movePointer(self, "pointerMove") then return true end
 		return result
 	end
 	local moveOutsideWrapper = function(self, ...)
+		self._sikWindowHovered = false
 		local result = type(previousMoveOutside) == "function"
 			and previousMoveOutside(self, ...) or nil
 		if movePointer(self, "pointerMoveOutside") then return true end

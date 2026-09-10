@@ -77,6 +77,18 @@ local function drawClippedText(panel, text, x, y, width, color)
 	if stencil and panel.clearStencilRect then panel:clearStencilRect() end
 end
 
+local function resolveContext(options)
+	local supplied = options.theme
+	local context = type(supplied) == "table" and supplied._sikThemeContext == true
+		and supplied or SiK.UI.Theme.context(options.parent, supplied, options.playerNum)
+	if context then options.theme = context end
+	return context
+end
+
+local function resolveMaterial(role, parent, options)
+	return SiK.UI.Theme.resolveMaterial(role, parent, options.material, options.theme)
+end
+
 local function createPopup(owner, options)
 	local rowHeight = math.max(24, n(options.rowHeight, owner.height))
 	local maxRows = math.max(1, math.floor(n(options.maxVisibleRows, 9)))
@@ -101,6 +113,14 @@ local function createPopup(owner, options)
 	popup._sikVisibleEntries = entries
 	popup._sikSearchQuery = ""
 	popup._sikUiComponent = "combo-popup"
+	popup._sikThemeContext = options.theme
+	popup._sikMaterial = resolveMaterial("popover", owner, options)
+	if type(options.theme) == "table" and options.theme._sikThemeContext == true then
+		SiK.UI.Theme.bind(popup, options.theme, function(widget, context)
+			widget._sikThemeContext = context
+			widget._sikMaterial = resolveMaterial("popover", owner, options)
+		end)
+	end
 
 	function popup:visibleRowCount()
 		return math.max(1, math.floor((self.height - inputHeight - 2) / self.rowHeight))
@@ -125,8 +145,9 @@ local function createPopup(owner, options)
 
 	function popup:prerender()
 		local theme = SiK.UI.Theme.tokens(options.theme)
-		self:drawRect(0, 0, self.width, self.height, 0.88,
-			theme.surface.r, theme.surface.g, theme.surface.b)
+		local material = self._sikMaterial
+		local fill = material and material.paint or theme.surfaceAlt
+		self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
 		local visible = self:visibleRowCount()
 		for row = 1, visible do
 			local index = self.offset + row
@@ -157,8 +178,8 @@ local function createPopup(owner, options)
 			self:drawRect(trackX, thumbY, 3, thumbH, theme.accent.a,
 				theme.accent.r, theme.accent.g, theme.accent.b)
 		end
-		self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
-			theme.border.r, theme.border.g, theme.border.b)
+		self:drawRectBorder(0, 0, self.width, self.height, theme.accent.a,
+			theme.accent.r, theme.accent.g, theme.accent.b)
 	end
 
 	function popup:onMouseWheel(delta)
@@ -194,6 +215,7 @@ end
 
 function Combo.create(options)
 	options = options or {}
+	local context = resolveContext(options)
 	local panel = ISPanel:new(n(options.x, 0), n(options.y, 0),
 		math.max(1, n(options.w or options.width, 160)),
 		math.max(1, n(options.h or options.height, 30)))
@@ -206,13 +228,25 @@ function Combo.create(options)
 	panel._sikPlaceholder = options.placeholder ~= nil and tostring(options.placeholder) or nil
 	panel.enable = options.enabled ~= false
 	panel._sikUiComponent = "combo"
+	panel._sikThemeContext = options.theme
+	panel._sikMaterial = resolveMaterial("control", options.parent, options)
+	if type(context) == "table" and context._sikThemeContext == true then
+		SiK.UI.Theme.bind(panel, context, function(widget, liveContext)
+			widget._sikThemeContext = liveContext
+			widget._sikMaterial = resolveMaterial("control", options.parent, options)
+		end)
+	end
 
 	function panel:prerender()
 		local theme = SiK.UI.Theme.tokens(options.theme)
-		local fill = self.enable and theme.surface or theme.background
-		self:drawRect(0, 0, self.width, self.height, 0.88, fill.r, fill.g, fill.b)
-		self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
-			theme.border.r, theme.border.g, theme.border.b)
+		local material = self._sikMaterial
+		local fill = self.enable and (material and material.paint or theme.surfaceAlt) or theme.background
+		self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
+		local popup = self._sikPopover and self._sikPopover:getActive()
+		local error = options.error == true or options.state == "error"
+		local border = error and theme.danger or ((popup or self.selected > 0) and theme.accent or theme.border)
+		self:drawRectBorder(0, 0, self.width, self.height, border.a,
+			border.r, border.g, border.b)
 		local item = self._sikItems[self.selected]
 		local color = self.enable and (item and theme.text or theme.textMuted) or theme.textMuted
 		local y = math.floor((self.height - fontHeight(UIFont.Small)) / 2)

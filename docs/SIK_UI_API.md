@@ -22,14 +22,22 @@ framework does not resolve item types, learning, network or product semantics.
 ## Window material, focus and initial cascade
 
 `UI.Theme.resolveMaterial(role, parent, overrides, themeContext?)` returns a descriptor with
-exactly `role`, `paint` and `effective`. `paint` is the source RGBA drawn once
-by the current widget; `effective` is the composited RGBA available to children
-and diagnostics. Roles are `window` (.86), `header`/`footer` (.20), `surface`
-(.13), `surfaceAlt` (.18), `control` (.88), `inherit` and `transparent`.
+`role`, `paint`, `effective` and the inherited `surfaceBase`. `paint` is the
+source RGBA drawn once by the current widget; `effective` is the composited
+RGBA available to children and diagnostics. Roles are `window` (.80),
+`header`/`footer` (.20), `surface` (.13), `surfaceAlt` (.18), `popover` (.72),
+`control` (.88), `inherit` and `transparent`.
 The latter two have `paint=nil` and add no base. `parent` accepts a descriptor
 or panel `_sikMaterial`; explicit overrides use a role key, for example
-`{window={r=0,g=0,b=0,a=.86}}`, and alpha zero is valid. Legacy `Theme.tokens`
+`{window={r=0,g=0,b=0,a=.80}}`, and alpha zero is valid. Legacy `Theme.tokens`
 and table tokens do not change.
+
+Structural `surface` and `surfaceAlt` roles inherit the nearest non-structural
+`surfaceBase`. The resolver derives only the source-over alpha delta still
+needed over the parent that PZ has already painted. Repeating ordinary Blocks
+therefore does not darken the same area at every nesting level. Controls and
+detached popovers are capped at effective alpha `.92`. A table Block keeps its
+existing opaque table palette and does not resolve either structural role.
 
 ### Theme context
 
@@ -73,6 +81,12 @@ for that player and draws the focus border, inner line and rectangular
 its current band. `FocusStack.activeWindow(playerNum)` follows modal,
 transient-owner and parent links to its Window.
 
+The existing render hit-test adjusts only the window chrome source alpha:
+active+hover `1.00`, active outside `0.94`, inactive+hover `0.90`, inactive
+outside `0.82`. It installs no event or global poll. Content and text retain
+their own alpha, so the active or hovered window gains legibility without
+fading labels and the world remains visible through every ordinary window.
+
 `cascadeOnOverlap=true` is opt-in. A new unanchored Window with no restored
 geometry cascades only when it overlaps a visible SiK Window for that player:
 `(+54,+48)`, or compact `(+32,+32)`, then viewport-clamped. Restored geometry,
@@ -82,8 +96,9 @@ popovers do not use this Window option.
 Dragged Windows may be parked almost completely beyond either horizontal edge.
 The shared clamp keeps a 32 px header grip visible so the player can recover
 the Window; it does not force the close control to remain on screen. A versions
-footer paints one internal top divider. Its hover hitbox is transparent and its
-descriptive tooltip preserves each supplied component as an explicit row.
+footer paints only its text on the window material: it adds no band, divider or
+frame. Its hover hitbox is transparent and its descriptive tooltip preserves
+each supplied component as an explicit row.
 
 ## Retained editor geometry and transient ownership
 
@@ -199,7 +214,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.3`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.4`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
@@ -319,7 +334,10 @@ host and never accepts a factory.
 `field.entry`. The panel and child retain distinct native identities and their
 own vanilla instantiation lifecycle. Text, focus, selection and font operations
 are explicitly forwarded; `javaObject`, `target` and `instantiate` are not aliases
-of the child. Attach and resize the panel, not its text backend.
+of the child. Attach and resize the panel, not its text backend. The SiK panel
+owns the complete visible surface and semantic border. The native child keeps
+only text, caret, selection, IME and keyboard behaviour; both its Lua chrome
+flags and its `UITextBox2` frame are disabled after instantiation.
 
 `UI.Controls.field(parent, { onSubmit = callback })` invokes the optional
 callback only for that field's Enter submission, using the standard context
@@ -362,6 +380,12 @@ search text is initially empty; its placeholder is presentation only. Filtering
 matches the local option name literally and case-insensitively where Lua has a
 case mapping, with no pattern interpretation or queries. UTF-8/CJK names remain
 literal. Closing and reopening clears the query and rebuilds the visible list.
+
+The closed selector and popup are framework-owned panels, not an `ISComboBox`.
+Their palette-aware material uses the neutral SiK border at rest and the accent
+border for an active selection/open popup; error state uses the danger token.
+The detached popup resolves its own capped material and does not inherit the
+already-composed control alpha.
 
 Items may be `{text, value, group, groupLabel, disabled, placeholder}`.
 Nonempty group headings are drawn only for matching items and are never

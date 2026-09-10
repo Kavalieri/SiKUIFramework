@@ -1400,7 +1400,10 @@ end
 function TableInstance:dispose()
 	if self.disposed then return false end
 	self.disposed = true
-	for index = 1, #(self.blocks or {}) do
+	-- Ancestors are stored nearest-first. Restore their materials outside-in so
+	-- every nested Block resolves against the parent's final effective surface,
+	-- rather than retaining the temporary opaque table descriptor.
+	for index = #(self.blocks or {}), 1, -1 do
 		local block = self.blocks[index]
 		if block and block._tableUnmounted then block:_tableUnmounted() end
 	end
