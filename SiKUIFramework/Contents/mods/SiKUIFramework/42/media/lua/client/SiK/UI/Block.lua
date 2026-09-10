@@ -236,12 +236,6 @@ function BlockInstance:_refreshMaterial(context)
 	local overrides = type(self.background) == "table" and { surface = self.background } or nil
 	local material = SiK.UI.Theme.resolveMaterial("surface",
 		self.parent and self.parent._sikMaterial or nil, overrides, context)
-	if self._sikTableCount > 0 then
-		local surface = SiK.UI.Theme.tokens(context).surface
-		material.paint = SiK.UI.Theme.normalizeColor(surface, material.paint)
-		material.paint.a = 1
-		material.effective = SiK.UI.Theme.normalizeColor(material.paint, material.paint)
-	end
 	self.panel._sikMaterial = material
 	self.panel.drawBackground = true
 	self.panel.backgroundColor = SiK.UI.Theme.normalizeColor(material.paint, material.paint)
@@ -253,13 +247,13 @@ end
 function BlockInstance:_tableMounted()
 	if self.disposed then return end
 	self._sikTableCount = self._sikTableCount + 1
-	return self:_refreshMaterial()
+	return self
 end
 
 function BlockInstance:_tableUnmounted()
 	if self.disposed then return end
 	self._sikTableCount = math.max(0, self._sikTableCount - 1)
-	return self:_refreshMaterial()
+	return self
 end
 
 --- Compose intrinsic content in the canonical Block rectangle. Widgets are

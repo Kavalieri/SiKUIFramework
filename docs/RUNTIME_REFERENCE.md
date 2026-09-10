@@ -19,7 +19,7 @@ matrix. No visual constructor is shared or server-side.
 The framework currently has two independent version axes:
 
 - `SiK.UI.Version.string()` and `mod.info` report the runtime/mod version
-  `1.0.2-dev1.5`.
+  `1.0.2-dev1.6`.
 - The catalog manifest reports `manifestVersion=0.1.0-preview`. Generated
   surface `frameworkRef.manifestVersion` pins this manifest contract, not the
   runtime/mod release number.
@@ -122,7 +122,8 @@ lookup functions allocate no lifecycle owner and therefore have no disposal.
 ### Window and Modal
 
 `Window.create` accepts `profile` (`terminal`, `compact`, `standard`, `wide`,
-`editor` or `task`), optional initial bounds, `safeMargin`, `draggable`, `resizable`,
+`editor` or `task`), optional initial bounds, `safeMargin`, `edgeParkingMargin`,
+`draggable`, `resizable`,
 `closable`, `geometryKey`, `closeOnEscape`, `disposeOnClose`, header/footer
 tables and local callbacks. A header accepts `productName`, `contextName`,
 `separator`, `status`, `statusPlacement`, `statusDot` and `close`. A footer

@@ -65,8 +65,13 @@ local function visibleEntries(owner, query)
 end
 
 local function drawArrow(panel, x, y)
-	return SiK.UI.Icon.drawRotatedExact(panel, "sik.arrow.right.14",
+	local drawn = SiK.UI.Icon.drawRotatedExact(panel, "sik.arrow.right.14",
 		x, y, 14, 14, 90)
+	if drawn then return true end
+	-- A few ISUI doubles and older renderer paths do not expose native
+	-- rotation. Preserve the canonical asset as a visible right-facing
+	-- disclosure affordance instead of silently losing the combo button.
+	return SiK.UI.Icon.drawExact(panel, "sik.arrow.right.14", x, y, 14, 14)
 end
 
 local function drawClippedText(panel, text, x, y, width, color)
@@ -256,7 +261,7 @@ function Combo.create(options)
 		self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
 		local popup = self._sikPopover and self._sikPopover:getActive()
 		local error = options.error == true or options.state == "error"
-		local border = error and theme.danger or ((popup or self.selected > 0) and theme.accent or theme.border)
+		local border = error and theme.danger or (popup and theme.accent or theme.border)
 		self:drawRectBorder(0, 0, self.width, self.height, border.a,
 			border.r, border.g, border.b)
 		local item = self._sikItems[self.selected]

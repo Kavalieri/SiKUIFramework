@@ -288,14 +288,14 @@ function Window.clampBounds(panel, rect)
 	if type(panel) ~= "table" then return nil, "invalid_window" end
 	local options = panel._sikWindowOptions or {}
 	return SiK.UI.Viewport.clampAccessible(rect, panel.playerNum, options.environment,
-		n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
+		n(options.edgeParkingMargin, 0), {
 			headerHeight = panel.headerHeight, headerWidth = n(options.headerReachWidth, 32),
 		})
 end
 
 local constraintKeys = {
 	"profile", "minWidth", "minHeight", "maxWidth", "maxHeight",
-	"capWidth", "capHeight", "safeMargin", "environment", "playerNum",
+	"capWidth", "capHeight", "safeMargin", "edgeParkingMargin", "environment", "playerNum",
 }
 
 function Window.updateConstraints(panel, overrides)
@@ -828,16 +828,14 @@ local function installPointerHandlers(panel)
 	end
 	local moveWrapper = function(self, ...)
 		self._sikWindowHovered = true
-		local result = type(previousMove) == "function" and previousMove(self, ...) or nil
 		if movePointer(self, "pointerMove") then return true end
-		return result
+		return type(previousMove) == "function" and previousMove(self, ...) or nil
 	end
 	local moveOutsideWrapper = function(self, ...)
 		self._sikWindowHovered = false
-		local result = type(previousMoveOutside) == "function"
-			and previousMoveOutside(self, ...) or nil
 		if movePointer(self, "pointerMoveOutside") then return true end
-		return result
+		return type(previousMoveOutside) == "function"
+			and previousMoveOutside(self, ...) or nil
 	end
 	local function release(self, ...)
 		local previous = type(previousUp) == "function" and previousUp(self, ...) or nil

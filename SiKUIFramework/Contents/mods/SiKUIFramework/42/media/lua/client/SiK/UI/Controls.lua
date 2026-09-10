@@ -14,6 +14,20 @@ SiK.UI.Namespace.define("Controls", Controls)
 
 local DEFAULT_INFO_ICON = "sik.info.24"
 
+local function disableNativeTextFrame(native)
+	-- B42 exposes this Java member through Kahlua with a non-Lua function type.
+	-- setFrameAlpha is deliberately avoided: UITextBox2 may have no NineGrid
+	-- frame and throws a Java NPE before Kahlua can contain it with pcall.
+	native:setHasFrame(false)
+end
+
+local function suppressNativeTextChrome(entry)
+	if not entry then return end
+	entry.drawBackground = false
+	entry.drawBorder = false
+	if entry.javaObject then pcall(disableNativeTextFrame, entry.javaObject) end
+end
+
 local function n(value, fallback)
 	value = tonumber(value)
 	if value == nil or value ~= value then return fallback end
@@ -826,8 +840,7 @@ function Controls.field(parent, options)
 	entry:initialise()
 	-- The wrapper paints the SiK surface.  These flags cover the ISPanel path
 	-- used by B42 before the native text object renders its caret and selection.
-	entry.drawBackground = false
-	entry.drawBorder = false
+	suppressNativeTextChrome(entry)
 	-- ISTextEntryBox:setEditable delegates to its Java text box.  Project
 	-- Zomboid only creates that object from instantiate(), not initialise().
 	-- Controls.field applies its initial enabled state before it is attached, so
@@ -836,11 +849,7 @@ function Controls.field(parent, options)
 	-- B42's native UITextBox2 owns a separate frame.  Colour tables alone do
 	-- not disable it, so suppress that Java chrome after instantiate while
 	-- leaving the text backend (caret, selection, IME and keyboard) untouched.
-	local native = entry.javaObject
-	if native then
-		if type(native.setHasFrame) == "function" then pcall(native.setHasFrame, native, false) end
-		if type(native.setFrameAlpha) == "function" then pcall(native.setFrameAlpha, native, 0) end
-	end
+	suppressNativeTextChrome(entry)
         field.prerender = function(self)
                 local theme = SiK.UI.Theme.tokens(options.theme)
                 local enabled = options.enabled ~= false
@@ -875,8 +884,7 @@ function Controls.field(parent, options)
                 local theme = SiK.UI.Theme.tokens(options.theme)
 		self.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 		self.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-		self.drawBackground = false
-		self.drawBorder = false
+		suppressNativeTextChrome(self)
                 self.textColor = { r = theme.text.r, g = theme.text.g,
 			b = theme.text.b, a = theme.text.a }
 		if type(basePrerender) == "function" then return basePrerender(self) end
@@ -1199,6 +1207,7 @@ function Controls.search(parent, options)
 		payload = options.payload, theme = options.theme, statefulChrome = true,
 		leadingIcon = options.searchIcon or "sik.search.18",
 		trailingActionIcon = options.clearIcon or "sik.close.18",
+		iconSize = 18, iconPadding = math.max(8, n(options.iconPadding, 8)),
 		trailingActionVisible = tostring(options.text or "") ~= "",
 		onTrailingAction = function() return clear(panel) end,
 		onChange = function() scheduleChange(panel) end,
