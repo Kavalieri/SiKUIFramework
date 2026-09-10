@@ -29,9 +29,9 @@ function Card.metrics(variant)
 			gap = 10, stateDotSize = 6, actionHeight = 32, headerHeight = 24 }
 	end
 	if variant == "output" then
-		return { minWidth = 260, minHeight = 216, iconSize = 40, padding = 8,
-			gap = 16, stateDotSize = 6, actionHeight = 32, headerHeight = 24,
-			requirementIconSize = 32 }
+		return { minWidth = 260, minHeight = 120, iconSize = 32, padding = 8,
+			gap = 8, stateDotSize = 6, actionHeight = 32, headerHeight = 26,
+			requirementIconSize = 32, requirementMinHeight = 38 }
 	end
 	if variant == "palette" then
 		local padding, swatchHeight, titleGap = 8, 50, 5
@@ -46,6 +46,28 @@ function Card.metrics(variant)
 end
 
 function Card.summaryMetrics() return Card.metrics("summary") end
+
+-- Pure measurement is shared by declarative parents and mounted cards. No
+-- temporary controls are created while resolving a parent's content height.
+function Card.measureData(data, width, variant)
+	data = type(data) == "table" and data or {}
+	local metrics = Card.metrics(data.variant or variant)
+	if type(data.output) ~= "table" then return metrics.minHeight end
+	local contentWidth = math.max(1, (tonumber(width) or metrics.minWidth) - metrics.padding * 2)
+	local function rowHeight(spec)
+		if type(spec) ~= "table" then return 0 end
+		local icon = spec.icon or spec.texture
+		local iconSize = math.max(0, tonumber(spec.iconSize) or metrics.requirementIconSize or metrics.iconSize)
+		local textWidth = math.max(1, contentWidth - (icon and (iconSize + metrics.gap) or 0))
+		local lines = SiK.UI.Controls.wrapText(tostring(spec.text or spec.label or ""), textWidth, UIFont.Small)
+		return math.max(metrics.requirementMinHeight or 1, icon and iconSize or 0,
+			#lines * fontHeight(UIFont.Small) + math.max(0, #lines - 1) * 2)
+	end
+	local rowGap = type(data.requirement) == "table" and metrics.gap or 0
+	return math.max(metrics.minHeight, metrics.padding * 2 + metrics.headerHeight + metrics.gap
+		+ rowHeight(data.requirement) + rowHeight(data.output) + rowGap
+		+ metrics.gap + (metrics.actionHeight or 0))
+end
 
 local function clipped(text, width, font)
 	return SiK.UI.Controls.wrapText(tostring(text or ""), math.max(1, width), font)[1] or ""
@@ -91,9 +113,13 @@ function Card.create(options)
 		end
 		return tostring(value or "")
 	end
+	function instance:measure(width)
+		return Card.measureData(self.data, width or self.panel.width, self.variant)
+	end
 
 	local function layoutRequirement()
 		if not instance.requirementRow then return end
+		if instance.outputRow then return end
 		local actionReserve = instance.actionButton and (metrics.actionHeight + metrics.gap) or 0
 		local bodyTop = metrics.padding + metrics.headerHeight + metrics.gap
 		local bodyHeight = math.max(1, panel.height - bodyTop - metrics.padding - actionReserve)
@@ -101,6 +127,20 @@ function Card.create(options)
 		instance.requirementRow:reflow(math.max(1, panel.width - metrics.padding * 2))
 		local rowHeight = math.min(bodyHeight, instance.requirementRow.height)
 		instance.requirementRow:setY(bodyTop + math.max(0, bodyHeight - rowHeight))
+	end
+	local function layoutOutputRows()
+		if not instance.outputRow then return end
+		local width = math.max(1, panel.width - metrics.padding * 2)
+		local y = metrics.padding + metrics.headerHeight + metrics.gap
+		if instance.requirementRow then
+			instance.requirementRow:setX(metrics.padding)
+			instance.requirementRow:reflow(width)
+			instance.requirementRow:setY(y)
+			y = y + instance.requirementRow.height + metrics.gap
+		end
+		instance.outputRow:setX(metrics.padding)
+		instance.outputRow:reflow(width)
+		instance.outputRow:setY(y)
 	end
 
 	function instance:setData(data)
@@ -113,10 +153,11 @@ function Card.create(options)
 			status = tostring(data.status or data.statusLabel or options.status or options.statusLabel or ""),
 			statusTone = data.statusTone or data.tone or options.statusTone or options.tone or "textMuted",
 			requirement = normalizeRequirement(data.requirement or options.requirement),
+			output = normalizeRequirement(data.output or options.output),
 			actionLabel = tostring(data.actionLabel or options.actionLabel or ""),
 			swatches = data.swatches or options.swatches,
-			selected = data.selected ~= nil and data.selected == true or options.selected == true,
-			locked = data.locked ~= nil and data.locked == true or options.locked == true,
+			selected = data.selected == true or (data.selected == nil and options.selected == true),
+			locked = data.locked == true or (data.locked == nil and options.locked == true),
 		}
 		if self.actionButton then
 			self.actionButton.title = self.data.actionLabel
@@ -135,8 +176,10 @@ function Card.create(options)
 		if data.payload ~= nil then self.payload = data.payload end
 		if self.requirementRow and type(self.data.requirement) == "table" then
 			self.requirementRow:setData(self.data.requirement)
-			layoutRequirement()
 		end
+		if self.outputRow and type(self.data.output) == "table" then self.outputRow:setData(self.data.output) end
+		layoutRequirement()
+		layoutOutputRows()
 		return self
 	end
 
@@ -189,6 +232,7 @@ function Card.create(options)
 			end
 			return
 		end
+		if instance.outputRow then return end
 		if data.icon then
 			local iconY = bodyTop + math.max(0,
 				math.floor((bodyHeight - metrics.iconSize) / 2))
@@ -242,16 +286,23 @@ function Card.create(options)
 		})
 	end
 
-	if type(options.requirement) == "table" then
-		instance.requirementRow = SiK.UI.Controls.requirementRow(panel, {
+	local function createRequirementRow(spec)
+		return SiK.UI.Controls.requirementRow(panel, {
 			x = metrics.padding, y = 0, w = math.max(1, panel.width - metrics.padding * 2),
-			text = options.requirement.text or options.requirement.label,
-			icon = options.requirement.icon or options.requirement.texture,
-			state = options.requirement.state ~= nil and options.requirement.state or options.requirement.met,
-			tone = options.requirement.tone,
-			iconSize = options.requirement.iconSize or metrics.requirementIconSize or metrics.iconSize,
+			text = spec.text or spec.label,
+			icon = spec.icon or spec.texture,
+			state = spec.state ~= nil and spec.state or spec.met,
+			tone = spec.tone,
+			iconSize = spec.iconSize or metrics.requirementIconSize or metrics.iconSize,
+			minHeight = metrics.requirementMinHeight,
 			playerNum = options.playerNum, theme = options.theme,
 		})
+	end
+	if type(options.requirement) == "table" then
+		instance.requirementRow = createRequirementRow(options.requirement)
+	end
+	if type(options.output) == "table" then
+		instance.outputRow = createRequirementRow(options.output)
 	end
 
 	panel.onMouseDown = function() return not instance.data.locked end
@@ -284,6 +335,7 @@ function Card.create(options)
 			self.header:reflow(math.max(1, self.panel.width - metrics.padding * 2))
 		end
 		layoutRequirement()
+		layoutOutputRows()
 		return self
 	end
 	function instance:dispose()

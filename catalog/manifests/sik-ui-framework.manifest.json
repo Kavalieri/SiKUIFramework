@@ -52,6 +52,7 @@
       { "name": "grow", "valueKinds": ["number", "data"] },
       { "name": "shrink", "valueKinds": ["number", "data"] },
       { "name": "columns", "valueKinds": ["number", "data"] },
+      { "name": "stack-below", "valueKinds": ["number", "token"] },
       { "name": "order", "valueKinds": ["number", "data"] },
       { "name": "span", "valueKinds": ["number", "data"] },
       { "name": "overflow", "valueKinds": ["string", "data"] },

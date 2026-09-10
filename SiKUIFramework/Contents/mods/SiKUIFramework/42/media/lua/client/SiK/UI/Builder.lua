@@ -261,6 +261,19 @@ end
 
 local intrinsicHeight
 local nodeProperty
+local childWidthRects
+
+local function innerWidth(node, context, width)
+        width = math.max(1, n(width, (context.viewport or {}).w or 1))
+        local padding = 0
+        if node.type == "block" then padding = SiK.UI.Metrics.block.padding
+        elseif node.type == "container" then
+                padding = layoutValues(node, context).padding
+                if padding == nil then padding = SiK.UI.Metrics.block.padding end
+        end
+        local inset = SiK.UI.Layout.insets(padding, 0)
+        return math.max(1, width - inset.left - inset.right)
+end
 
 -- The declarative shorthand used by consumers belongs to the same layout
 -- contract whether it is measured before construction or resolved during a
@@ -268,6 +281,11 @@ local nodeProperty
 -- measured as a column and then painted as a row.
 local function compositionMode(node, layout, context)
 	local mode = layout.mode
+	local stackBelow = tonumber(layout["stack-below"])
+	local viewport = context.viewport or {}
+	if mode == "row" and stackBelow and n(viewport.w or viewport.width, math.huge) <= stackBelow then
+		return "column"
+	end
 	for index = 1, #(node.props or {}) do
 		local prop = node.props[index]
 		if prop.name == "direction" and mode == nil then
@@ -286,18 +304,21 @@ end
 -- split into arbitrary equal-height strips.  A consumer describes structure;
 -- the framework reserves the standard chrome and asks the scroll host to carry
 -- any remaining height.  Coordinates never leak back to product surfaces.
-local function minimumContentHeight(node, context)
+local function minimumContentHeight(node, context, width)
 	local children = node.children or {}
 	if #children == 0 then return 0 end
 	local layout = layoutValues(node, context)
 	local gap = math.max(0, n(layout.gap, 0))
-	local mode = compositionMode(node, layout, context)
+        local mode = compositionMode(node, layout, context)
+        local widths = childWidthRects(node, { x = 0, y = 0, w = innerWidth(node, context, width),
+                h = 1, _sikContentAlreadyInset = true }, context)
 	local total, largest, visible = 0, 0, 0
 	for index = 1, #children do
 		if nodeVisible(children[index], context) ~= false then
 			local childLayout = layoutValues(children[index], context)
-			local height = intrinsicHeight(children[index], childLayout, context, mode, true)
-			if height == nil then height = minimumContentHeight(children[index], context) end
+                        local childWidth = widths[index].w
+                        local height = intrinsicHeight(children[index], childLayout, context, mode, true, childWidth)
+                        if height == nil then height = minimumContentHeight(children[index], context, childWidth) end
 			height = math.max(1, n(height, 1))
 			visible, total, largest = visible + 1, total + height, math.max(largest, height)
 		end
@@ -327,7 +348,7 @@ local function minimumContentHeight(node, context)
 	return total + math.max(0, visible - 1) * gap
 end
 
-intrinsicHeight = function(node, layout, context, parentMode, measuring)
+intrinsicHeight = function(node, layout, context, parentMode, measuring, width)
 	if layout.height ~= nil then return layout.height end
 	-- Grow controls only the parent's main axis. During intrinsic measurement we
 	-- still need the child's minimum content height; during real column layout a
@@ -340,7 +361,25 @@ intrinsicHeight = function(node, layout, context, parentMode, measuring)
 	-- `grow` belongs to the main axis only.  It must not erase the standard
 	-- cross-axis height of a control: doing so turned every field in a row into
 	-- a viewport-tall rectangle during runtime reflow.
-	if node.type == "control" or node.type == "form" or node.type == "action-group" then
+	if node.type == "form" or node.type == "action-group" then
+		return math.max(SiK.UI.Controls.metrics(context.profileId).rowHeight,
+                        minimumContentHeight(node, context, width))
+	end
+	if node.type == "control" then
+		local kind = nodeProperty(node, "kind", context)
+		local source = nodeProperty(node, "data", context)
+		local data = type(source) == "table" and source or {}
+		local wrap = data.wrap
+		if wrap == nil then wrap = nodeProperty(node, "wrap", context) end
+		if kind == "status" and wrap == true then
+			local framed = data.framed
+			if framed == nil then framed = nodeProperty(node, "framed", context) end
+			local text = data.text or nodeProperty(node, "label", context) or nodeProperty(node, "text", context)
+			if source ~= nil and type(source) ~= "table" then text = source end
+			return SiK.UI.Controls.measureStatus(text, width, {
+				framed = framed, indicator = data.indicator or nodeProperty(node, "indicator", context),
+			}).height
+		end
 		return SiK.UI.Controls.metrics(context.profileId).rowHeight
 	end
 	if node.type == "table" or node.type == "virtual-list" then
@@ -355,52 +394,45 @@ intrinsicHeight = function(node, layout, context, parentMode, measuring)
 		return math.max(120, tableMetrics.headerHeight + tableMetrics.rowHeight * 2)
 	end
 	if node.type == "card" then
-		return math.max(72, minimumContentHeight(node, context) + 16)
+                return math.max(72, minimumContentHeight(node, context, width) + 16)
 	end
 	if node.type == "card-collection" then
 		local variant = node.variant or nodeProperty(node, "variant", context)
-		local cardMetrics = SiK.UI.Card.metrics(variant)
-		local columns = math.max(1, math.floor(n(layout.columns,
-			n(nodeProperty(node, "columns", context), 1))))
-		local count = #(node.children or {})
-		local items = nil
-		-- Data-bound collections (Options palettes and Addons) carry their cards
-		-- through `items`, not declarative child nodes. Measuring children alone
-		-- reserved a single row and left every later row outside the collection's
-		-- hitbox even though CardCollection had rendered it.
-		if count == 0 then
-			items = nodeProperty(node, "items", context)
-			if type(items) == "table" then count = #items end
-		end
-		local rows = math.max(1, math.ceil(count / columns))
-		local gap = math.max(0, n(layout.gap, SiK.UI.Metrics.spacing.sm))
-		local measured = cardMetrics.minHeight * rows + gap * (rows - 1)
-		if type(items) == "table" and #items > 0 then
-			measured = 0
-			for rowStart = 1, #items, columns do
-				local rowHeight = cardMetrics.minHeight
-				for index = rowStart, math.min(#items, rowStart + columns - 1) do
-					rowHeight = math.max(rowHeight, n(items[index] and items[index].height,
-						cardMetrics.minHeight))
-				end
-				if measured > 0 then measured = measured + gap end
-				measured = measured + rowHeight
-			end
-		end
-		return math.max(measured, minimumContentHeight(node, context))
+                local items = nodeProperty(node, "items", context)
+                if #(node.children or {}) > 0 then
+                        items = {}
+                        for index = 1, #node.children do
+                                local child, item = node.children[index], {}
+                                for _, prop in ipairs(child.props or {}) do
+                                        item[prop.name] = Builder.resolve(prop.value, context)
+                                end
+                                item.variant = child.variant or variant
+                                item.height = layoutValues(child, context).height
+                                items[index] = item
+                        end
+                end
+                local measured = SiK.UI.CardCollection.measure(type(items) == "table" and items or {}, {
+                        cardVariant = variant, gap = layout.gap,
+                        columns = nodeProperty(node, "columns", context) or layout.columns,
+                        maxColumns = nodeProperty(node, "maxColumns", context),
+                        minItemWidth = nodeProperty(node, "minItemWidth", context) or layout["min-item-width"],
+                        minCardWidth = nodeProperty(node, "minCardWidth", context),
+                        cardHeight = nodeProperty(node, "cardHeight", context),
+                }, { x = 0, y = 0, w = math.max(1, n(width, (context.viewport or {}).w or 1)) })
+                return measured.contentHeight
 	end
 	if node.type == "block" then
 		local metrics = SiK.UI.Controls.metrics(context.profileId)
 		local title = nodeProperty(node, "title", context)
 		local header = title ~= nil and metrics.rowHeight + metrics.rowGap or 0
-		return header + SiK.UI.Metrics.block.padding * 2 + minimumContentHeight(node, context)
+                return header + SiK.UI.Metrics.block.padding * 2 + minimumContentHeight(node, context, width)
 	end
 	if node.type == "container" then
 		local padding = SiK.UI.Layout.insets(layout.padding, SiK.UI.Metrics.block.padding)
-		return padding.top + padding.bottom + minimumContentHeight(node, context)
+                return padding.top + padding.bottom + minimumContentHeight(node, context, width)
 	end
 	if node.type == "scroll" then
-		return minimumContentHeight(node, context)
+                return minimumContentHeight(node, context, width)
 	end
 	if layout.grow ~= nil then return nil end
 	return nil
@@ -420,10 +452,33 @@ local function intrinsicWidth(node, layout, context, parentMode)
         local kind = nodeProperty(node, "kind", context)
         local metrics = SiK.UI.Controls.metrics(context.profileId)
         if kind == "icon-button" then return metrics.rowHeight end
+	if kind == "button" and node.variant == "field-action" then
+		return SiK.UI.Controls.measureButtonWidth(nodeProperty(node, "label", context) or "",
+			UIFont.Small)
+	end
 	-- Ordinary unsized controls are flex entries. Content-based button widths
 	-- made sibling actions depend on translated label length and left unused
 	-- space; only intrinsically square icon controls opt out of row growth.
         return nil
+end
+
+-- Width is independent of wrapped text height. Resolve it through Container
+-- first, then measure content at precisely that width before allocating height.
+childWidthRects = function(node, area, context)
+        local parentLayout, entries = layoutValues(node, context), {}
+        parentLayout.mode = compositionMode(node, parentLayout, context)
+        for index = 1, #(node.children or {}) do
+                local child = node.children[index]
+                local layout = layoutValues(child, context)
+                entries[index] = { visible = nodeVisible(child, context), height = 1,
+                        width = intrinsicWidth(child, layout, context, parentLayout.mode),
+                        minWidth = layout["min-width"], maxWidth = layout["max-width"],
+                        grow = layout.grow, fill = layout.fill, span = layout.span,
+                        order = layout.order, align = layout.align, alignX = layout["align-x"] }
+        end
+        return SiK.UI.Container.resolveRects(area, entries, { mode = parentLayout.mode,
+                padding = area._sikContentAlreadyInset and 0 or parentLayout.padding,
+                gap = parentLayout.gap, columns = parentLayout.columns, justify = parentLayout.justify })
 end
 
 local function childArea(handle, fallback)
@@ -466,15 +521,16 @@ end
 local function resolveChildGeometry(node, area, context)
 	local children, entries = node.children or {}, {}
 	if #children == 0 then return entries end
-	local parentLayout = layoutValues(node, context)
-	parentLayout.mode = compositionMode(node, parentLayout, context)
+        local parentLayout = layoutValues(node, context)
+        parentLayout.mode = compositionMode(node, parentLayout, context)
+        local widths = childWidthRects(node, area, context)
         for index = 1, #children do
 		local visible = nodeVisible(children[index], context)
 		local layout = layoutValues(children[index], context)
 		entries[index] = {
                 visible = visible, x = layout.x, y = layout.y,
                         width = intrinsicWidth(children[index], layout, context, parentLayout.mode),
-			height = intrinsicHeight(children[index], layout, context, parentLayout.mode, false),
+                        height = intrinsicHeight(children[index], layout, context, parentLayout.mode, false, widths[index].w),
 			fill = layout.fill,
                         minWidth = layout["min-width"], maxWidth = layout["max-width"],
                         minHeight = layout["min-height"], maxHeight = layout["max-height"],
@@ -530,7 +586,7 @@ local function resolvedProps(node, context, bounds)
 	end
 	if (node.type == "block" or node.type == "container" or node.type == "scroll")
 		and result.contentHeight == nil then
-		result.contentHeight = minimumContentHeight(node, context)
+                result.contentHeight = minimumContentHeight(node, context, bounds.w)
 	end
 	local caps, err = SiK.UI.Capabilities.resolve(node, context, Builder.resolve)
 	if not caps then return nil, err end
@@ -948,10 +1004,11 @@ local function cardItem(child, context, rect, actionTarget)
 		value = props.value, description = props.description,
 		status = props.status or props.statusLabel,
 		statusTone = props.statusTone or props.tone,
-		requirement = props.requirement, actionLabel = props.actionLabel,
+                requirement = props.requirement, output = props.output, actionLabel = props.actionLabel,
+                variant = props.variant,
 		swatches = props.swatches, selected = props.selected == true,
 		tooltip = props.tooltip, locked = props.locked,
-		payload = props.data, height = rect.h,
+                payload = props.data, height = props.layout and props.layout.height,
 		contentHeight = props.contentHeight or rect.h,
 		action = actionTarget and function(payload)
 			return SiK.UI.Bindings.emit(actionTarget, "activate", payload)

@@ -1,7 +1,6 @@
 require "SiK/UI/Controls"
 require "SiK/UI/Block"
 require "SiK/UI/Metrics"
-require "SiK/UI/Viewport"
 
 local UI = SiK.UI
 local Requirements = UI.Requirements or {}
@@ -43,8 +42,12 @@ function Requirements.create(options)
 		panel:setWidth(math.max(1, tonumber(width) or panel.width))
 		local gap = UI.Metrics.tokens().spacing.sm
 		local grouped = count >= 4 and #groups == 2
-		local viewport = UI.Viewport.resolve(options.playerNum, options.environment)
-		local columns = grouped and UI.Metrics.gridColumns(viewport) or 1
+		-- The approved HTML breakpoint is 900 px. Requirements live inside
+		-- resizable Blocks, so this must use their actual content width rather
+		-- than the monitor viewport: a narrow modal on a wide display still
+		-- needs one readable requirement column.
+		local columns = grouped and UI.Metrics.gridColumns({ w = panel.width,
+			h = UI.Metrics.grid.minimumTwoColumnHeight }) or 1
 		local columnW = math.max(1, (panel.width - gap * (columns - 1)) / columns)
 		local bottom, cursor = 0, 0
 		for index, group in ipairs(groups) do

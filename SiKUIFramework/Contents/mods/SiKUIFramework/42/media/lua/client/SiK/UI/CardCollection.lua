@@ -19,6 +19,19 @@ local function normalizedItems(items, options)
 	return out
 end
 
+function CardCollection.measure(items, options, bounds)
+	options = options or {}
+	local config = {}
+	for key, value in pairs(options) do config[key] = value end
+	config.minItemWidth = options.minCardWidth or options.minItemWidth
+	config.itemHeight = options.cardHeight or options.itemHeight
+	local normalized = normalizedItems(items, options)
+	config.measureItem = function(_, item, width)
+		return SiK.UI.Card.measureData(item, width, item.variant or options.cardVariant)
+	end
+	return SiK.UI.Collection.measure(normalized, config, bounds)
+end
+
 -- Typed convenience preset over the generic Collection. It repeats atomic
 -- Cards and adds no product vocabulary or alternate layout engine.
 function CardCollection.create(options)
@@ -55,7 +68,7 @@ function CardCollection.create(options)
 			title = item.title, text = item.text,
 			icon = item.icon or item.texture,
 			value = item.value, description = item.description,
-			requirement = item.requirement, actionLabel = item.actionLabel,
+			requirement = item.requirement, output = item.output, actionLabel = item.actionLabel,
 			status = item.status or item.statusLabel,
 			statusTone = item.statusTone or item.tone,
 			swatches = item.swatches, selected = item.selected == true,
@@ -65,6 +78,9 @@ function CardCollection.create(options)
 			onActivate = item.action or item.onActivate or options.onActivate,
 			playerNum = options.playerNum, theme = options.theme,
 		})
+	end
+	collectionOptions.measureItem = function(entry, item, width)
+		return SiK.UI.Card.measureData(item, width, item.variant or options.cardVariant)
 	end
 	local instance, err = SiK.UI.Collection.create(collectionOptions)
 	if not instance then

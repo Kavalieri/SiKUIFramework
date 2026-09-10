@@ -5,6 +5,115 @@ preview client API. A consumer must not import `SiK/UI/*.lua` implementation
 files as a private dependency, nor treat Global Storage or another product
 namespace as a framework alias.
 
+## Optional icons in list choices
+
+`UI.Controls.listOption(parent, options)` retains its existing full-row click,
+wrapping and selection behavior. Optional `icon` (or `texture`) is resolved by
+`UI.Icon`; `iconSize` defaults to 32 and `iconGap` to 8. The control owns the
+leading icon rectangle and subtracts it from the text width. Its minimum height
+includes the icon plus vertical padding. Without an icon geometry is unchanged.
+`setData({icon=...})` updates the icon; `icon=false` clears it.
+
+Optional `afterRender(control)` runs after the control's own drawing. It lets a
+consumer drive a presentation-only hover attachment without adding a global
+listener. The consumer owns that attachment's hide/dispose lifecycle. The
+framework does not resolve item types, learning, network or product semantics.
+
+## Window material, focus and initial cascade
+
+`UI.Theme.resolveMaterial(role, parent, overrides, themeContext?)` returns a descriptor with
+exactly `role`, `paint` and `effective`. `paint` is the source RGBA drawn once
+by the current widget; `effective` is the composited RGBA available to children
+and diagnostics. Roles are `window` (.86), `header`/`footer` (.20), `surface`
+(.13), `surfaceAlt` (.18), `control` (.88), `inherit` and `transparent`.
+The latter two have `paint=nil` and add no base. `parent` accepts a descriptor
+or panel `_sikMaterial`; explicit overrides use a role key, for example
+`{window={r=0,g=0,b=0,a=.86}}`, and alpha zero is valid. Legacy `Theme.tokens`
+and table tokens do not change.
+
+### Theme context
+
+`Theme.set(overrides, playerNum?)` replaces the selected override layer with
+validated colours. Omitted tokens inherit; `{}` clears that layer, preserving
+the original reset contract.
+Without `playerNum` it changes the framework-global active palette; with a
+player number (integer 0 through 3) it changes only that player's layer. Equal effective values are a
+no-op. Table tokens (`tableHeader`, `tableRow`, `tableRowAlt`, `tableRowHover`,
+`tableRowGroup`, `tableRowChild` and `tableRowDivider`) remain ordinary palette
+tokens and keep their supplied colours.
+
+`Theme.context(parent, overrides?, playerNum?)` returns a live inheritance
+descriptor. `parent` may be a parent context or a panel with
+`_sikThemeContext`; a missing player inherits from that parent or panel.
+`Theme.tokens(context)` returns a new, independent resolved snapshot each time:
+defaults, global layer, player layer, parent partial overrides and local partial
+overrides, in that order. Zero channels are valid overrides.
+
+`Theme.bind(widget, context, apply)` stores the binding only on `widget` and
+keeps a weak widget registry. It invokes `apply(widget, context)` initially and
+only after a `Theme.set` changes that widget's resolved snapshot. The callback
+reads its snapshot with `Theme.tokens(context)`. Passing `nil` as `context`
+removes the binding. No polling, surface reconstruction or owner-to-widget
+strong registry is introduced. `resolveMaterial` accepts an optional fourth
+`themeContext` argument and obtains its RGB tokens from that context while
+preserving the material alpha contract.
+
+`Block.create` and `Container.create` accept `accentTone` as an optional
+semantic tone such as `info`, `warning` or `danger`. It paints the existing
+left accent line from the inherited live context and updates only on the
+existing Theme binding; it does not reflow or rebuild the surface. An explicit
+RGBA `accent` always takes precedence and preserves the prior compatibility
+path.
+
+`Window` stores `_sikMaterial`, `_sikHeaderMaterial` and
+`_sikFooterMaterial` once. Its focus frame reads the top `FocusStack` Window
+for that player and draws the focus border, inner line and rectangular
+`(4,4,.46)` shadow without blur, polling or repaint subscriptions.
+`FocusStack.activate(owner, playerNum)` orders an existing visible peer within
+its current band. `FocusStack.activeWindow(playerNum)` follows modal,
+transient-owner and parent links to its Window.
+
+`cascadeOnOverlap=true` is opt-in. A new unanchored Window with no restored
+geometry cascades only when it overlaps a visible SiK Window for that player:
+`(+54,+48)`, or compact `(+32,+32)`, then viewport-clamped. Restored geometry,
+`positionAnchor` and `viewportAnchor` always take precedence. Menus and
+popovers do not use this Window option.
+
+## Retained editor geometry and transient ownership
+
+`Layout.column({retain=true, ...})` records placement operations;
+`column:reflow({x,y,w})` replays geometry on the same widgets. Heights may be
+numbers or `function(width)` for intrinsic wrapped content. Ordinary columns
+remain immediate and return `column_not_retained` from `reflow`.
+`Block:beginColumn({retain=true})` retains its column and recalculates intrinsic
+height when its width changes. Enclosing retained columns consume the resulting
+height of nested Blocks. Consumers must lay out their outer Blocks in order;
+reflow must not perform data queries or recreate interactive controls.
+When content height changes without a width change, `Block:refreshLayout()`
+replays the retained subtree once from children to parent. Existing controls,
+focus and callbacks remain mounted; call it on the content-change event.
+
+`Modal.apply` and `Modal.create` preserve `onReflow(context)`, but invoke it
+once only after the Modal has synchronized its content Block or dock host.
+`context.value` is therefore the final Modal content rectangle suitable for
+consumer layout; the callback is not emitted during Modal construction.
+
+`Popover.attach(control, {owner=optionalWindow, playerNum=optionalPlayer, ...})`
+resolves the top ancestor as its default owner at open time. A supplied player
+must match that owner. Transients inherit native top-layer priority, follow
+owner activation, and close on owner hide, removal or disposal. The owner
+binding is shared while popovers are open and restores its methods when the
+last one closes; no global event hook is installed. The control still owns and
+disposes the returned popover handle.
+
+The declarative layout binding `stack-below` accepts a numeric threshold or
+number token. A row becomes a column when the surface viewport width is at or
+below that threshold; measuring and placement use the same mode. This viewport
+is local to the mounted surface, not the monitor. A button with the
+`field-action` variant takes its measured label width alongside a flexible
+field, and fills the available width after stacking. Ordinary sibling actions
+retain equal widths. Form and action-group heights include all stacked rows.
+
 ## Load and scope
 
 Declare the exact ModID in the consuming mod metadata:
@@ -233,6 +342,42 @@ before acceptance proceeds.
 filtering, scheduling or mutation; consumers retain their raw query separately
 so clearing, resizing and changing filters do not lose the entered value.
 
+### Searchable combo
+
+`UI.Controls.combo(parent, { searchable=true, searchPlaceholder="Buscar",
+items, selected, placeholder })` keeps the ordinary Combo API and opens a
+framework Popover containing `Controls.search` plus the option viewport. The
+search text is initially empty; its placeholder is presentation only. Filtering
+matches the local option name literally and case-insensitively where Lua has a
+case mapping, with no pattern interpretation or queries. UTF-8/CJK names remain
+literal. Closing and reopening clears the query and rebuilds the visible list.
+
+Items may be `{text, value, group, groupLabel, disabled, placeholder}`.
+Nonempty group headings are drawn only for matching items and are never
+selectable. Filtering and scrolling use a visible projection, but selection and
+the change callback retain the original item/index/value. `disabled=true` and
+`placeholder=true` items are muted and cannot become selected. `maxVisibleRows`
+counts option rows and group headings; the popup adds the search input above
+that viewport.
+
+`placeholder` on the Combo itself is not an item. It displays only while
+`selected==0`; `selected=false` or `setSelected(0)` explicitly clears the
+selection. Existing nonsearchable Combos still select their first enabled item
+when `selected` is omitted. Searchable Combos begin unselected unless the caller
+supplies a valid selection. Empty candidate lists should use `enabled=false` and
+the caller's placeholder, for example `"Sin candidatos"`.
+
+The popup caps both its width and height to the player safe viewport before the
+Popover positions it. Long option and Combo labels use a local stencil, so CJK
+text clips inside that rectangle. Replacing items while open closes that stale
+projection; invalid or disabled `setSelected(..., true)` calls do not emit a
+previously selected item.
+
+`UI.Controls.styleButton(button, { danger=true })` uses the calm destructive
+button role (`dangerButtonFill`, `dangerButtonBorder`, `dangerButtonText`),
+separate from semantic `danger`. `UI.Controls.setDanger(button, boolean)`
+updates that role on an already styled button.
+
 `UI.Controls.dismissibleRow(parent, options)` constructs one atomic bordered
 row with truncated left text and a `sik.close.18` removal control.  Options are
 `text`, `tone`, `theme`, `tooltip`, `actionTooltip`, `onRemove`, `playerNum`,
@@ -268,7 +413,9 @@ the native child.
 present. With `expansion` and no pagination, every expanded child is projected
 using the normal table scroll with no pager row, height reservation or pager
 hitbox. With both options present, it projects one inline pager row after each
-expanded parent instead of reserving a table-global footer. The row is structural:
+expanded parent only when that parent has more than one child page, instead of
+reserving a table-global footer. A single-page hierarchy has no pager row,
+reserved height or pager hitbox. When present, the row is structural:
 it is not selectable, draggable, a tooltip item, a row-adapter callback or an
 object/row total.
 
@@ -323,6 +470,12 @@ with a 16 px leading reservation. `framed = true` uses the compact bordered
 status row with padding 10 px horizontally and 6 px vertically, minimum height
 30 px. Neither variant truncates text or changes its semantic class by length.
 Existing status constructors without `wrap` retain their behavior.
+
+`UI.Controls.measureStatus(text, width, { framed?, indicator?, font? })` returns
+`{ lines, height }` without creating a widget. Wrapped status controls and the
+Builder use this same measurement. Declarative control data can supply `text`,
+`wrap`, `framed` and `maxLength` (for fields). An explicit layout height remains
+an override; omit it when the status should grow with translated content.
 
 Constructors return `instance` on success, or `nil, reason` for invalid inputs
 or unsupported setup. Mutators return their instance/value on success, or
@@ -395,3 +548,38 @@ and gap come from Block/Metrics. Height follows wrapped rows; no fill.
 `reflow` replaces owned controls and updates `height`; callers position the
 panel through their Block column and repeat enclosing layout after reflow.
 Disposing the panel also disposes its handle, idempotently.
+
+# Card and Collection
+
+`Card.create({variant="output", requirement, output, actionLabel, ...})` accepts
+an `output` slot with `{text, icon, tone, iconSize}`. When supplied, the card
+uses the existing `Controls.requirementRow` for the output and suppresses its
+legacy icon/value/description renderer. A table `requirement` is its preceding
+sibling row. Both rows use 8 px Card padding and gaps, a 26 px header, 32 px
+icons, a 38 px minimum row and the existing 32 px full-width action. Wrapped
+text determines the row height; `Card:measure(width)` returns the required
+card height. `Card.measureData(data, width, variant)` provides the same measure
+before mounting, without allocating controls. Cards without `output` retain
+their former slots and layout.
+
+`Collection.create` accepts optional
+`measureItem(entry, item, width, index, collection) -> height`. It is evaluated
+only during creation/reflow and the greatest declared or measured height sets a
+row's common height. `Collection.measure(items, options, bounds)` returns
+`{rects, columns, contentHeight}` using that same layout resolver. Its optional
+measurement callback receives no mounted entry during this pure preflight.
+`CardCollection.measure(items, options, bounds)` applies Card variants and
+wrapped output measurements; the declarative Builder uses it at the resolved
+local width before allocating the parent Block's height. `CardCollection`
+forwards the `output` slot to each retained Card. Reflow keeps the
+existing Card, requirement rows, output row and action instances; no factory or
+host API change is required.
+# Table: visible data order
+
+`table:getVisibleDataRows()` returns a new array of the consumer's row data
+references in the current expansion/page order. It excludes synthetic pager
+rows, collapsed children and children on other pages. Rows outside the scrolled
+viewport remain included: this is the navigable data order, not the recycled
+widget pool. Mutating the array does not mutate the table; treat its data
+references as read-only. A disposed table returns an empty array. Intended for
+on-demand range selection, without observing private projection state.

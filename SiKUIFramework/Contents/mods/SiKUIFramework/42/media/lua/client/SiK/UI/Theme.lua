@@ -32,11 +32,19 @@ Theme.defaults = Theme.defaults or {
 	success = rgba(0.32, 0.82, 0.46, 1),
 	warning = rgba(0.92, 0.72, 0.22, 1),
 	danger = rgba(0.94, 0.30, 0.28, 1),
+	-- Button danger is a calm chrome role, separate from the saturated semantic
+	-- danger token used by status and progress renderers.
+	dangerButtonFill = rgba(41 / 255, 21 / 255, 20 / 255, 1),
+	dangerButtonBorder = rgba(116 / 255, 56 / 255, 51 / 255, 1),
+	dangerButtonText = rgba(241 / 255, 138 / 255, 129 / 255, 1),
 	info = rgba(0.42, 0.68, 0.92, 1),
 }
 
 local active = Theme._active or {}
 Theme._active = active
+Theme._activeByPlayer = Theme._activeByPlayer or {}
+Theme._bindings = Theme._bindings or setmetatable({}, { __mode = "k" })
+Theme._revision = Theme._revision or 0
 
 local function channel(value, fallback)
 	value = tonumber(value)
@@ -60,29 +68,168 @@ function Theme.normalizeColor(value, fallback)
 	return cloneColor(value) or cloneColor(fallback) or { r = 0, g = 0, b = 0, a = 1 }
 end
 
-function Theme.tokens(overrides)
+local function playerKey(playerNum)
+	if playerNum == nil then return nil end
+	local value = tonumber(playerNum)
+	if value == nil or value ~= value or value < 0 or value > 3
+		or value ~= math.floor(value) then return nil, "invalid_player" end
+	return tostring(value)
+end
+
+local function copyColors(source)
+	local copy = {}
+	for key, value in pairs(source or {}) do copy[key] = cloneColor(value) end
+	return copy
+end
+
+local function normalizeOverrides(overrides)
+	if overrides == nil then return {} end
+	if type(overrides) ~= "table" then return nil, "invalid_theme" end
 	local out = {}
-	for key, value in pairs(Theme.defaults) do out[key] = cloneColor(value) end
-	for key, value in pairs(active) do out[key] = cloneColor(value) end
-	if type(overrides) == "table" then
-		for key, value in pairs(overrides) do
-			if type(value) == "table" then out[key] = cloneColor(value) end
-		end
+	for key, value in pairs(overrides) do
+		local color = cloneColor(value)
+		if not color then return nil, "invalid_color" end
+		out[key] = color
 	end
 	return out
 end
 
-function Theme.set(overrides)
-	if type(overrides) ~= "table" then return nil, "invalid_theme" end
-	local replacement = {}
-	for key, value in pairs(overrides) do
-		local color = cloneColor(value)
-		if not color then return nil, "invalid_color" end
-		replacement[key] = color
+local function mergeColors(target, source)
+	for key, value in pairs(source or {}) do target[key] = cloneColor(value) end
+	return target
+end
+
+local function colorsEqual(left, right)
+	for key, value in pairs(left or {}) do
+		local other = right and right[key] or nil
+		if not other or value.r ~= other.r or value.g ~= other.g
+			or value.b ~= other.b or value.a ~= other.a then return false end
 	end
-	active = replacement
-	Theme._active = active
+	for key in pairs(right or {}) do if not left or not left[key] then return false end end
 	return true
+end
+
+local function isContext(value)
+	return type(value) == "table" and value._sikThemeContext == true
+end
+
+local function parentContext(parent)
+	if isContext(parent) then return parent end
+	if type(parent) == "table" and isContext(parent._sikThemeContext) then
+		return parent._sikThemeContext
+	end
+	return nil
+end
+
+--- A context remains live: it stores only partial overrides and ancestry.
+--- Snapshot tokens are always returned independently by Theme.tokens(context).
+function Theme.context(parent, overrides, playerNum)
+	-- Factories forward a live context through options.theme; it is not a
+	-- colour dictionary and must retain its identity/ancestry.
+	if isContext(overrides) then return overrides end
+	local inherited = parentContext(parent)
+	local normalized, reason = normalizeOverrides(overrides)
+	if not normalized then return nil, reason end
+	if playerNum == nil and inherited then playerNum = inherited.playerNum end
+	if playerNum == nil and type(parent) == "table" and not isContext(parent) then
+		playerNum = parent.playerNum
+	end
+	local key, playerReason = playerKey(playerNum)
+	if playerReason then return nil, playerReason end
+	return { _sikThemeContext = true, parent = inherited, overrides = normalized,
+		playerNum = key and tonumber(key) or nil }
+end
+
+local function resolveContext(context, depth)
+	if context._cachedRevision == Theme._revision then return context._cachedTokens end
+	local out = copyColors(Theme.defaults)
+	mergeColors(out, active)
+	local key = playerKey(context.playerNum)
+	if key then mergeColors(out, Theme._activeByPlayer[key]) end
+	-- Contexts are created as acyclic ancestry. Bound traversal also degrades
+	-- safely if a third-party consumer mutates that public table incorrectly.
+	local inherited = {}
+	if isContext(context.parent) and depth < 64 then
+		resolveContext(context.parent, depth + 1)
+		mergeColors(inherited, context.parent._cachedOverrides)
+	end
+	mergeColors(inherited, context.overrides)
+	mergeColors(out, inherited)
+	context._cachedOverrides = inherited
+	context._cachedRevision, context._cachedTokens = Theme._revision, out
+	return out
+end
+
+function Theme.tokens(overrides)
+	local context = isContext(overrides) and overrides or nil
+	if context then return copyColors(resolveContext(context, 0)) end
+	local out = copyColors(Theme.defaults)
+	mergeColors(out, active)
+	if type(overrides) == "table" then mergeColors(out, overrides) end
+	return out
+end
+
+local function notifyBindings()
+	local widgets = {}
+	for widget in pairs(Theme._bindings) do
+		local depth, parent = 0, widget.parent
+		while type(parent) == "table" and depth < 64 do
+			depth = depth + 1
+			parent = parent.parent
+		end
+		widgets[#widgets + 1] = { widget = widget, depth = depth }
+	end
+	-- Parent material must be current before descendants compose their source
+	-- layers. This ordering is evaluated only on a changed palette.
+	table.sort(widgets, function(left, right) return left.depth < right.depth end)
+	for index = 1, #widgets do
+		local widget = widgets[index].widget
+		local binding = widget and widget._sikThemeBinding or nil
+		if binding and binding.apply then
+			local nextTokens = Theme.tokens(binding.context)
+			if not colorsEqual(binding.tokens, nextTokens) then
+				binding.tokens = nextTokens
+				pcall(binding.apply, widget, binding.context)
+			end
+		end
+	end
+end
+
+--- Replaces the global or player override layer; omitted tokens inherit.
+--- An empty table restores that layer's inherited defaults, as before.
+--- Equal values are a no-op and do not invoke bound widget callbacks.
+function Theme.set(overrides, playerNum)
+	if type(overrides) ~= "table" then return nil, "invalid_theme" end
+	local normalized, reason = normalizeOverrides(overrides)
+	if not normalized then return nil, reason end
+	local key, playerReason = playerKey(playerNum)
+	if playerReason then return nil, playerReason end
+	local target = key and (Theme._activeByPlayer[key] or {}) or active
+	local replacement = normalized
+	if colorsEqual(target, replacement) then return false end
+	if key then Theme._activeByPlayer[key] = replacement
+	else active = replacement; Theme._active = active end
+	Theme._revision = Theme._revision + 1
+	notifyBindings()
+	return true
+end
+
+--- Binds a widget without retaining it from the context graph. The callback
+--- receives (widget, context); it may read its defensive snapshot via tokens.
+function Theme.bind(widget, context, apply)
+	if type(widget) ~= "table" then return nil, "invalid_widget" end
+	if context == nil then
+		Theme._bindings[widget] = nil
+		widget._sikThemeBinding, widget._sikThemeContext = nil, nil
+		return true
+	end
+	if not isContext(context) or type(apply) ~= "function" then return nil, "invalid_binding" end
+	local binding = { context = context, apply = apply, tokens = Theme.tokens(context) }
+	widget._sikThemeBinding = binding
+	widget._sikThemeContext = context
+	Theme._bindings[widget] = true
+	pcall(apply, widget, context)
+	return widget
 end
 
 function Theme.color(name, overrides)
@@ -122,6 +269,65 @@ function Theme.apply(widget, role, overrides)
 	widget.borderColor = cloneColor(tokens.border)
 	widget._sikThemeRole = role
 	return widget
+end
+
+-- Window chrome is layered source material. `paint` is the one colour a
+-- renderer draws at this node; `effective` is bookkeeping for descendants.
+Theme.materialDefaults = Theme.materialDefaults or {
+	window = { token = "background", alpha = 0.86 },
+	header = { token = "header", alpha = 0.20 },
+	footer = { token = "header", alpha = 0.20 },
+	surface = { token = "surface", alpha = 0.13 },
+	surfaceAlt = { token = "surfaceAlt", alpha = 0.18 },
+	control = { token = "surfaceAlt", alpha = 0.88 },
+}
+
+local function materialParent(parent)
+	if type(parent) ~= "table" then return nil end
+	if type(parent._sikMaterial) == "table" then return parent._sikMaterial end
+	if type(parent.effective) == "table" then return parent end
+	return nil
+end
+
+local function materialContext(parent, themeContext)
+	if isContext(themeContext) then return themeContext end
+	return parentContext(parent)
+end
+
+--- Resolves one source layer without allocating theme tokens during render.
+--- `overrides[role]={r,g,b,a}` is explicit and accepts alpha 0.
+--- themeContext is optional and carries the live inherited palette.
+function Theme.resolveMaterial(role, parent, overrides, themeContext)
+	role = role or "inherit"
+	local inherited = materialParent(parent)
+	local parentColor = inherited and inherited.effective or nil
+	if role == "inherit" or role == "transparent" then
+		return { role = role, paint = nil, effective = cloneColor(parentColor)
+			or { r = 0, g = 0, b = 0, a = 0 } }
+	end
+	local spec = Theme.materialDefaults[role]
+	if not spec then return nil, "invalid_material_role" end
+	local override = type(overrides) == "table" and overrides[role] or nil
+	if override ~= nil and type(override) ~= "table" then return nil, "invalid_material_override" end
+	local tokens = Theme.tokens(materialContext(parent, themeContext))
+	local paint = cloneColor(tokens[spec.token] or Theme.defaults[spec.token])
+	paint.a = spec.alpha
+	if override then
+		paint.r = channel(override.r or override[1], paint.r)
+		paint.g = channel(override.g or override[2], paint.g)
+		paint.b = channel(override.b or override[3], paint.b)
+		paint.a = channel(override.a or override[4], paint.a)
+	end
+	local base = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
+	local alpha = paint.a + base.a * (1 - paint.a)
+	local sourceWeight = alpha > 0 and paint.a / alpha or 0
+	local baseWeight = alpha > 0 and base.a * (1 - paint.a) / alpha or 0
+	return { role = role, paint = paint, effective = {
+		r = paint.r * sourceWeight + base.r * baseWeight,
+		g = paint.g * sourceWeight + base.g * baseWeight,
+		b = paint.b * sourceWeight + base.b * baseWeight,
+		a = alpha,
+	} }
 end
 
 return Theme

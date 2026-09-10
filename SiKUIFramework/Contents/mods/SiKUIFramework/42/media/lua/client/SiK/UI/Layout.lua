@@ -366,41 +366,81 @@ end
 
 function Layout.column(options)
 	options = options or {}
+	local metrics = SiK.UI.Metrics.inherit(options.parent, options.metrics)
 	return setmetatable({
 		x = n(options.x, 0), width = math.max(0, n(options.width or options.w, 0)),
-		gap = math.max(0, n(options.gap, SiK.UI.Metrics.spacing.sm)),
+		gap = math.max(0, n(options.gap, metrics.spacing.sm)),
 		startY = n(options.y, 0), cursor = n(options.y, 0),
 		bottom = options.bottom, position = options.position,
+		_sikMetrics = metrics,
+		entries = options.retain == true and {} or nil,
 	}, Column)
 end
 
+function Column:_remember(method, ...)
+	if self.entries and not self.replaying then
+		self.entries[#self.entries + 1] = { method = method, args = { ... } }
+	end
+end
+
+--- Retained columns replay geometry only: existing controls, callbacks, focus
+--- and selection survive resize. A height callback receives the current width.
+function Column:reflow(rect)
+	if not self.entries then return nil, "column_not_retained" end
+	if self.replaying then return self end
+	self.x, self.startY = n(rect.x, self.x), n(rect.y, self.startY)
+	self.width = math.max(0, n(rect.w or rect.width, self.width))
+	self.cursor, self.replaying = self.startY, true
+	for index = 1, #self.entries do
+		local entry = self.entries[index]
+		self[entry.method](self, unpack(entry.args))
+	end
+	self.replaying = false
+	return self
+end
+
+local function columnHeight(column, value)
+	if type(value) == "function" then value = value(column.width) end
+	return math.max(0, n(value, 0))
+end
+
 function Column:space(height)
-	self.cursor = self.cursor + math.max(0, n(height, 0))
+	self:_remember("space", height)
+	self.cursor = self.cursor + columnHeight(self, height)
 	return self
 end
 
 function Column:place(widget, height, gapAfter)
+	self:_remember("place", widget, height, gapAfter)
 	self:_set(widget, self.x, self.cursor)
-	self.cursor = self.cursor + math.max(0, n(height, 0))
+	self.cursor = self.cursor + columnHeight(self, height)
 		+ math.max(0, n(gapAfter, self.gap))
 	return self
 end
 
 function Column:label(widget, height, gapAfter)
+	self:_remember("label", widget, height, gapAfter)
 	self:_set(widget, self.x, self.cursor, self.width)
-	self.cursor = self.cursor + math.max(0, n(height, 0))
+	self.cursor = self.cursor + columnHeight(self, height)
 		+ math.max(0, n(gapAfter, self.gap))
 	return self
 end
 
 function Column:block(widget, height, gapAfter)
-	self:_set(widget, self.x, self.cursor, self.width, math.max(0, n(height, 0)))
-	self.cursor = self.cursor + math.max(0, n(height, 0))
+	self:_remember("block", widget, height, gapAfter)
+	height = columnHeight(self, height)
+	local block = widget and (widget._sikColumn and widget or widget._sikUiBlock)
+	if self.replaying and block and block._sikColumn then height = block.h end
+	self:_set(widget, self.x, self.cursor, self.width, height)
+	if block and block._sikColumn then height = block.h end
+	self.cursor = self.cursor + height
 		+ math.max(0, n(gapAfter, self.gap))
 	return self
 end
 
 function Column:row(height, items, options)
+	self:_remember("row", height, items, options)
+	height = columnHeight(self, height)
 	items, options = items or {}, options or {}
 	local specs = {}
 	for index = 1, #items do
@@ -420,6 +460,7 @@ function Column:row(height, items, options)
 end
 
 function Column:fill(widget, minimumHeight)
+	self:_remember("fill", widget, minimumHeight)
 	local height = math.max(n(minimumHeight, 0), n(self.bottom, self.cursor) - self.cursor)
 	self:_set(widget, self.x, self.cursor, self.width, height)
 	self.cursor = self.cursor + height

@@ -498,8 +498,10 @@ local controlVariantKinds = {
 
 local function controlPresentation(props)
 	local data = props.data
+	local isInput = props.kind == "field" or props.kind == "search"
 	local result = {
-		text = props.label or props.text, payload = nil, tooltip = props.tooltip,
+		text = isInput and (props.text or "") or (props.label or props.text),
+		payload = nil, tooltip = props.tooltip,
 		items = props.items or props.options, selected = props.selected,
 		tone = props.tone, color = props.color, indicator = props.indicator,
 		value = props.value, label = props.label, enabled = props.enabled,
@@ -507,6 +509,9 @@ local function controlPresentation(props)
 		glow = props.glow, size = props.size, progress = props.progress,
 		icon = props.icon or props["icon-key"], state = props.state,
 		met = props.met, iconSize = props.iconSize or props["icon-size"],
+		placeholder = props.placeholder or (isInput and props.label or nil), searchable = props.searchable,
+		searchPlaceholder = props.searchPlaceholder,
+		maxLength = props.maxLength, wrap = props.wrap, framed = props.framed,
 	}
 	if type(data) == "table" then
 		if data.text ~= nil then result.text = data.text end
@@ -531,6 +536,12 @@ local function controlPresentation(props)
 		if data.met ~= nil then result.met = data.met end
 		if data.iconSize ~= nil then result.iconSize = data.iconSize end
 		if data.enabled ~= nil then result.enabled = data.enabled end
+		if data.placeholder ~= nil then result.placeholder = data.placeholder end
+		if data.searchable ~= nil then result.searchable = data.searchable end
+		if data.searchPlaceholder ~= nil then result.searchPlaceholder = data.searchPlaceholder end
+		if data.maxLength ~= nil then result.maxLength = data.maxLength end
+		if data.wrap ~= nil then result.wrap = data.wrap end
+		if data.framed ~= nil then result.framed = data.framed end
 		result.payload = data.payload or data
 	elseif data ~= nil then
 		if props.kind == "combo" then result.selected = data
@@ -549,6 +560,7 @@ local function controlFactory(parent, props, context)
         -- labelled action uses the regular button primitive instead.
         local text = presentation.text
         local tooltip = presentation.tooltip
+		local placeholder = presentation.placeholder
         if kind == "iconButton" then
                 tooltip = tooltip or presentation.label or presentation.text
                 text = ""
@@ -563,6 +575,9 @@ local function controlFactory(parent, props, context)
                 iconFit = props.iconFit or props["icon-fit"] or (fieldAction and "fill" or nil),
 				iconPadding = props.iconPadding or props["icon-padding"] or (fieldAction and 4 or nil),
                 items = presentation.items, selected = presentation.selected,
+		placeholder = placeholder, searchable = presentation.searchable,
+		searchPlaceholder = presentation.searchPlaceholder,
+		maxLength = presentation.maxLength, wrap = presentation.wrap, framed = presentation.framed,
 		tone = presentation.tone, color = presentation.color, indicator = presentation.indicator,
 		value = presentation.value, label = presentation.label, status = presentation.status,
 		mode = presentation.mode, severity = presentation.severity, glow = presentation.glow,
@@ -835,6 +850,9 @@ local function controlUpdate(handle, props)
 		elseif handle.setText then handle:setText(tostring(text)) end
 	end
 	if handle._sikUiControl == "combo" then
+		if handle.setPlaceholderText and presentation.placeholder ~= nil then
+			handle:setPlaceholderText(presentation.placeholder)
+		end
 		if presentation.items and handle.setItems then
 			handle:setItems(presentation.items, presentation.selected)
 		end

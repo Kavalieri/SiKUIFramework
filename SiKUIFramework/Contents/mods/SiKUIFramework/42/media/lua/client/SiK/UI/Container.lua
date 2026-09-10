@@ -43,7 +43,7 @@ local function scrollGeometry(instance)
 	local contentHeight = math.max(0, number(instance.contentHeight, 0))
 	local viewportH = math.max(1, panel.height - padding.top - padding.bottom)
 	local overflow = contentHeight > viewportH
-	local tokens = SiK.UI.Metrics.tokens(options.metrics)
+	local tokens = instance.metrics or SiK.UI.Metrics.tokens(options.metrics)
 	local gutter = overflow and tokens.block.scrollGutter or 0
 	local viewport = { x = padding.left, y = padding.top,
 		w = math.max(1, panel.width - padding.left - padding.right - gutter), h = viewportH }
@@ -228,11 +228,19 @@ end
 function Container.create(options)
 	options = options or {}
 	if type(options.parent) ~= "table" then return nil, "invalid_parent" end
+	local metrics = SiK.UI.Metrics.inherit(options.parent, options.metrics)
 	local panel = SiK.UI.Controls.panel(options.parent, {
 		x = options.x or 0, y = options.y or 0,
 		w = options.w or options.width or 1, h = options.h or options.height or 1,
 		controlId = options.controlId or "container", playerNum = options.playerNum,
+		theme = options.theme,
 	})
+	-- Structural containers expose the inherited material/context but paint no
+	-- second base. Explicit consumer background and border options remain intact.
+	options.theme = panel._sikThemeContext or options.theme
+	panel._sikMaterial = SiK.UI.Theme.resolveMaterial("inherit",
+		type(options.parent) == "table" and options.parent._sikMaterial or nil,
+		nil, panel._sikThemeContext)
 	panel.drawBackground = options.background ~= nil and options.background ~= false
 	panel.clipChildren = options.overflow ~= "visible"
 	if options.background ~= nil and options.background ~= false then
@@ -247,20 +255,42 @@ function Container.create(options)
 	elseif options.border == false then
 		panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	end
-	if options.accent ~= nil then
+	-- An explicit RGBA accent remains the compatibility path.  A semantic tone
+	-- is resolved only on Theme.bind notifications, never from prerender, so it
+	-- stays live without allocating palette snapshots per frame.
+	local accentTone = options.accent == nil and options.accentTone or nil
+	local refreshAccent = nil
+	if accentTone ~= nil then
+		refreshAccent = function(widget, context)
+			widget._sikAccentColor = SiK.UI.Theme.normalizeColor(SiK.UI.Theme.color(accentTone, context),
+				{ r = 0, g = 0, b = 0, a = 0 })
+		end
+		refreshAccent(panel, panel._sikThemeContext)
+	end
+	if options.accent ~= nil or accentTone ~= nil then
 		local previousPrerender = panel.prerender
 		panel.prerender = function(self)
 			if type(previousPrerender) == "function" then previousPrerender(self) end
-			local accent = SiK.UI.Theme.normalizeColor(options.accent,
-				{ r = 0, g = 0, b = 0, a = 0 })
+			local accent = accentTone ~= nil and self._sikAccentColor
+				or SiK.UI.Theme.normalizeColor(options.accent, { r = 0, g = 0, b = 0, a = 0 })
 			self:drawRect(0, 0, math.max(1, number(options.accentWidth, 3)), self.height,
 				accent.a or accent[4] or 0.8, accent.r or accent[1], accent.g or accent[2], accent.b or accent[3])
 		end
 	end
-	local instance = { panel = panel, childParent = panel, items = {}, options = options,
+	local instance = { panel = panel, childParent = panel, items = {}, options = options, metrics = metrics,
 		overflow = options.overflow or "clip", contentHeight = math.max(0, number(options.contentHeight, 0)) }
 	panel._sikUiControl = "container"
 	panel._sikContainerInstance = instance
+	panel._sikMetrics = metrics
+	if refreshAccent then
+		function instance:refreshAccent(context)
+			refreshAccent(self.panel, context or self.panel._sikThemeContext)
+			return self
+		end
+		SiK.UI.Theme.bind(panel, panel._sikThemeContext, function(_, context)
+			instance:refreshAccent(context)
+		end)
+	end
 
 	function instance:add(widget, spec)
 		if self.disposed or type(widget) ~= "table" then return nil, "invalid_child" end

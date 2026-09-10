@@ -157,6 +157,50 @@ function Metrics.tokens(overrides)
 	return out
 end
 
+--- Resolves the numeric spacing context for a child without sharing mutable
+--- token tables. Only layout tokens inherit: table metrics remain local to a
+--- Table unless that Table receives its own explicit `metrics` option.
+function Metrics.inherit(parent, overrides)
+	local inherited = type(parent) == "table" and parent._sikMetrics or parent
+	local source = Metrics.tokens(inherited)
+	local out = Metrics.tokens()
+	out.spacing = copy(source.spacing)
+	out.block = copy(source.block)
+	out.safeMargin = source.safeMargin
+	if type(overrides) ~= "table" then return out end
+	if type(overrides.spacing) == "table" then
+		for key, value in pairs(overrides.spacing) do
+			out.spacing[key] = numberOr(value, out.spacing[key])
+		end
+	end
+	if type(overrides.block) == "table" then
+		for key, value in pairs(overrides.block) do
+			out.block[key] = numberOr(value, out.block[key])
+		end
+	end
+	out.safeMargin = numberOr(overrides.safeMargin, out.safeMargin)
+	-- A child can still deliberately configure its own Table. That configuration
+	-- is never obtained from the ancestor context above.
+	if type(overrides.table) == "table" then
+		out.table = Metrics.tokens({ table = overrides.table }).table
+	end
+	out.space4 = out.spacing.xxs
+	out.space6 = out.spacing.xs
+	out.space8 = out.spacing.sm
+	out.space12 = out.spacing.md
+	out.space16 = out.spacing.lg
+	out.blockPaddingX = out.block.padding
+	out.blockPaddingY = out.block.padding
+	out.scrollBarWidth = out.block.scrollBarWidth
+	out.scrollBarGap = out.block.scrollGap
+	out.scrollGutter = out.block.scrollGutter
+	out.tableRowHeight = out.table.rowHeight
+	out.tableHeaderHeight = out.table.headerHeight
+	out.tableColumnGap = out.table.columnGap
+	out.tableCellPadding = out.table.cellPadding
+	return out
+end
+
 function Metrics.profile(width, requested)
 	if requested and Metrics.profiles[requested] then
 		local selected = copy(Metrics.profiles[requested])

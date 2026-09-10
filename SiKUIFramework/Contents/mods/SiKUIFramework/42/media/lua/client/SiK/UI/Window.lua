@@ -21,6 +21,20 @@ local BASE_METHODS = {
 	onKeyRelease = ISPanel.onKeyRelease,
 }
 
+-- Weak lifecycle registry for the opt-in initial cascade; never polled.
+local liveWindows = setmetatable({}, { __mode = "k" })
+
+local function visible(panel)
+	if not panel or panel._sikDisposed then return false end
+	if panel.getIsVisible then return panel:getIsVisible() ~= false end
+	return panel.visible ~= false
+end
+
+local function overlaps(a, b)
+	return a.x < b.x + b.w and a.x + a.w > b.x
+		and a.y < b.y + b.h and a.y + a.h > b.y
+end
+
 function Window.derive(name)
 	if type(name) ~= "string" or name == "" then return nil, "invalid_class_name" end
 	return ISPanel:derive(name)
@@ -49,6 +63,15 @@ Window.profiles = Window.profiles or {
 		maxWidth = 8192, maxHeight = 8192, capWidth = 1, capHeight = 1 },
 	task = { width = 640, height = 520, minWidth = 420, minHeight = 260,
 		maxWidth = 760, maxHeight = 760, capWidth = 0.80, capHeight = 0.80 },
+	-- Requirement-driven tasks start wide enough for two independent blocks.
+	-- Their only ceiling is the safe viewport, so long localized requirements
+	-- can be resized instead of being forced into a second compact layout.
+	["task-requirements"] = { width = 960, height = 520, minWidth = 720, minHeight = 260,
+		maxWidth = math.huge, maxHeight = math.huge, capWidth = 1, capHeight = 1 },
+	-- Editing one installed terminal is narrower than a zone/container editor,
+	-- while keeping the same viewport-bounded resize contract.
+	["terminal-config"] = { width = 720, height = 320, minWidth = 560, minHeight = 180,
+		maxWidth = math.huge, maxHeight = math.huge, capWidth = 1, capHeight = 1 },
 }
 
 local function n(value, fallback)
@@ -307,19 +330,47 @@ local function saveGeometry(panel)
 end
 
 local function restoreGeometry(options)
-	if not options.geometryKey then return options end
+	if not options.geometryKey then options._sikGeometryRestored = false; return options end
 	local stored = SiK.UI.State.get(options.playerNum, options.geometryKey)
-	if type(stored) ~= "table" or type(stored.bounds) ~= "table" then return options end
+	if type(stored) ~= "table" or type(stored.bounds) ~= "table" then
+		options._sikGeometryRestored = false; return options
+	end
 	-- A geometry schema belongs to the window contract. A new layout must not
 	-- inherit compact bounds persisted by an incompatible release.
 	if options.geometryVersion ~= nil and stored.version ~= options.geometryVersion then
-		return options
+		options._sikGeometryRestored = false; return options
 	end
 	local copy = {}
 	for key, value in pairs(options) do copy[key] = value end
 	copy.x, copy.y = stored.bounds.x, stored.bounds.y
 	copy.w, copy.h = stored.bounds.w, stored.bounds.h
+	copy._sikGeometryRestored = true
 	return copy
+end
+
+function Window.hasOverlap(playerNum, bounds)
+	for panel in pairs(liveWindows) do
+		if panel.playerNum == playerNum and visible(panel) and overlaps(bounds, {
+			x = rectValue(panel, "x", "getX"), y = rectValue(panel, "y", "getY"),
+			w = rectValue(panel, "width", "getWidth"), h = rectValue(panel, "height", "getHeight"),
+		}) then return true end
+	end
+	return false
+end
+
+function Window.resolveInitialPosition(options, bounds)
+	if options._sikInitialPositionResolved == true then return bounds end
+	options._sikInitialPositionResolved = true
+	if options.cascadeOnOverlap ~= true or options._sikGeometryRestored == true
+		or options.positionAnchor ~= nil or options.viewportAnchor ~= nil then return bounds end
+	if not Window.hasOverlap(bounds.playerNum, bounds) then return bounds end
+	local compact = options.profile == "compact"
+	local shifted = { x = bounds.x + (compact and 32 or 54),
+		y = bounds.y + (compact and 32 or 48), w = bounds.w, h = bounds.h }
+	local clamped = SiK.UI.Viewport.clamp(shifted, bounds.playerNum, options.environment,
+		n(options.safeMargin, SiK.UI.Metrics.safeMargin))
+	for key, value in pairs(bounds) do if clamped[key] == nil then clamped[key] = value end end
+	return clamped
 end
 
 function Window.chromeRects(panel)
@@ -454,6 +505,19 @@ function Window.chromeRects(panel)
 	}
 end
 
+local function applyWindowTheme(panel, context)
+	local options = panel._sikWindowOptions
+	if not options then return end
+	panel._sikThemeColors = SiK.UI.Theme.tokens(context)
+	local function material(role, parent)
+		return SiK.UI.Theme.resolveMaterial(role, parent, options.material, context)
+			or SiK.UI.Theme.resolveMaterial(role, parent, nil, context)
+	end
+	panel._sikMaterial = material("window", nil)
+	panel._sikHeaderMaterial = material("header", panel._sikMaterial)
+	panel._sikFooterMaterial = material("footer", panel._sikMaterial)
+end
+
 function Window.render(panel, phase)
 	if type(panel) ~= "table" or type(panel._sikWindowOptions) ~= "table" then
 		return nil, "not_applied"
@@ -463,12 +527,24 @@ function Window.render(panel, phase)
 		return nil, "invalid_phase"
 	end
 	local rects = Window.chromeRects(panel)
-	local theme = SiK.UI.Theme.tokens(panel._sikWindowOptions.theme)
+	local theme = panel._sikThemeColors or SiK.UI.Theme.tokens(panel._sikWindowOptions.theme)
+	local material = panel._sikMaterial
+	local headerMaterial = panel._sikHeaderMaterial
+	local footerMaterial = panel._sikFooterMaterial
 	if phase ~= "foreground" then
-		panel:drawRect(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h, theme.background.a,
-			theme.background.r, theme.background.g, theme.background.b)
-		panel:drawRect(rects.header.x, rects.header.y, rects.header.w, rects.header.h, theme.header.a,
-			theme.header.r, theme.header.g, theme.header.b)
+		if SiK.UI.FocusStack.activeWindow(panel.playerNum) == panel then
+			-- An outer shadow must not darken the translucent window interior.
+			-- Two non-overlapping strips reproduce the unblurred 4px CSS shadow.
+			panel:drawRect(rects.frame.w, 4, 4, rects.frame.h, 0.46, 0, 0, 0)
+			panel:drawRect(4, rects.frame.h, math.max(0, rects.frame.w - 4), 4,
+				0.46, 0, 0, 0)
+		end
+		local paint = material and material.paint or theme.background
+		panel:drawRect(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h, paint.a,
+			paint.r, paint.g, paint.b)
+		paint = headerMaterial and headerMaterial.paint or theme.header
+		panel:drawRect(rects.header.x, rects.header.y, rects.header.w, rects.header.h, paint.a,
+			paint.r, paint.g, paint.b)
 		local edge = panel._sikWindowOptions.accentEdge
 		if edge then
 			if edge == true then edge = {} end
@@ -490,6 +566,9 @@ function Window.render(panel, phase)
 	if phase ~= "foreground" and rects.footer.h > 0 and panel._sikFooterText ~= "" then
 		local color = SiK.UI.Theme.color("textMuted", panel._sikWindowOptions.theme)
 		local y = rects.footer.y
+		local footerPaint = footerMaterial and footerMaterial.paint or theme.header
+		panel:drawRect(rects.footerBand.x, y, rects.footerBand.w, rects.footerBand.h, footerPaint.a,
+			footerPaint.r, footerPaint.g, footerPaint.b)
 		panel:drawRect(rects.footerBand.x, y, rects.footerBand.w, 1, theme.border.a,
 			theme.border.r, theme.border.g, theme.border.b)
 		local footerFont = panel._sikFooterFont or UIFont.Small
@@ -503,8 +582,14 @@ function Window.render(panel, phase)
 			color.r, color.g, color.b, color.a, footerFont)
 	end
 	if phase ~= "background" then
-		panel:drawRectBorder(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h, theme.border.a,
-			theme.border.r, theme.border.g, theme.border.b)
+		local active = SiK.UI.FocusStack.activeWindow(panel.playerNum) == panel
+		local border = active and SiK.UI.Theme.color("accent", panel._sikWindowOptions.theme) or theme.border
+		panel:drawRectBorder(rects.frame.x, rects.frame.y, rects.frame.w, rects.frame.h, border.a,
+			border.r, border.g, border.b)
+		if active then
+			panel:drawRectBorder(1, 1, math.max(0, rects.frame.w - 2), math.max(0, rects.frame.h - 2),
+				0.54, border.r, border.g, border.b)
+		end
 	end
 	if phase ~= "background" and rects.resize then
 		for line = 0, 2 do
@@ -613,6 +698,7 @@ local function installPointerHandlers(panel)
 		return true
 	end
 	local downWrapper = function(self, x, y, ...)
+		SiK.UI.FocusStack.activate(self, self.playerNum)
 		local gx, gy = globalPointer()
 		-- Keep the painted corner compact while exposing a more forgiving input
 		-- target. Consumers may tune it independently through resizeHitSize.
@@ -690,9 +776,13 @@ function Window.apply(panel, options)
 	if type(panel) ~= "table" then return nil, "invalid_window" end
 	if panel._sikWindowApplied then return panel end
 	options = restoreGeometry(options or {})
-	local bounds = Window.resolveBounds(options)
+	local bounds = Window.resolveInitialPosition(options, Window.resolveBounds(options))
 	panel._sikWindowApplied = true
 	panel._sikWindowOptions = options
+	options.theme = SiK.UI.Theme.context(options.parent or options.owner or panel.parent,
+		options.theme or panel._sikThemeContext, bounds.playerNum)
+		or SiK.UI.Theme.context(nil, nil, bounds.playerNum)
+	SiK.UI.Theme.bind(panel, options.theme, applyWindowTheme)
 	-- Factories keep the window as the real parent and place children with
 	-- contentRect(); no second panel owns or duplicates the window chrome.
 	panel.panel = panel
@@ -981,6 +1071,8 @@ function Window.apply(panel, options)
 		if self.addToUIManager then self:addToUIManager() end
 		if self.setVisible then self:setVisible(true) end
 		if self.bringToTop then self:bringToTop() end
+		liveWindows[self] = true
+		SiK.UI.FocusStack.activate(self, self.playerNum)
 		return self
 	end
 	function panel:hide()
@@ -1007,6 +1099,9 @@ function Window.apply(panel, options)
 	function panel:dispose()
 		if self._sikDisposed then return false end
 		self._sikDisposed = true
+		liveWindows[self] = nil
+		SiK.UI.Theme.bind(self, nil)
+		self._sikThemeColors = nil
 		saveGeometry(self)
 		if focusLayer then focusLayer:dispose(); focusLayer = nil end
 		cleanupPointer()
@@ -1032,6 +1127,8 @@ end
 
 function Window.create(options)
 	options = restoreGeometry(options or {})
+	-- apply owns the one initial cascade; resolving it here would consume the
+	-- marker and then recompute unshifted bounds when applying the chrome.
 	local bounds = Window.resolveBounds(options)
 	local panel = ISPanel:new(bounds.x, bounds.y, bounds.w, bounds.h)
 	panel:initialise()

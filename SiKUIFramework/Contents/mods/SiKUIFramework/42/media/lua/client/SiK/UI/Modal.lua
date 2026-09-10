@@ -4,6 +4,7 @@ require "SiK/UI/Block"
 require "SiK/UI/Scroll"
 require "SiK/UI/ScrollDock"
 require "SiK/UI/Controls"
+require "SiK/UI/FocusStack"
 
 local Modal = SiK.UI.Modal or {}
 SiK.UI.Namespace.define("Modal", Modal)
@@ -251,12 +252,60 @@ local function buildContentHost(panel, options)
 	return scroll.host, { x = 0, y = 0, w = contentRect.w, h = contentRect.h }
 end
 
+-- Window owns its own reflow, but a Modal must first move its content host.
+-- Keep the consumer callback private until that second step finishes so the
+-- public `onReflow` observes the rectangle it can actually lay out into.
+local function deferredWindowOptions(options)
+	local windowOptions = {}
+	for key, value in pairs(options or {}) do windowOptions[key] = value end
+	local consumerOnReflow = windowOptions.onReflow
+	if type(consumerOnReflow) == "function" then
+		windowOptions.onReflow = function(context)
+			local panel = context and context.component
+			if panel then panel._sikModalWindowReflowed = true end
+		end
+	end
+	return windowOptions, consumerOnReflow
+end
+
+local function installModalReflow(panel, baseReflow, consumerOnReflow)
+	panel.reflow = function(self)
+		if self._sikModalReflowing then return self end
+		self._sikModalReflowing = true
+		baseReflow(self)
+		local rect = self:contentRect()
+		if self._sikModalContentMode == "dock" then
+			SiK.UI.Layout.apply(self.contentHost, { x = rect.x, y = rect.y, w = rect.w, h = rect.h })
+		elseif self.contentBlock then
+			self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
+		end
+		local callbackContext = nil
+		if self._sikModalWindowReflowed then
+			self._sikModalWindowReflowed = nil
+			if type(consumerOnReflow) == "function" and not self._sikModalDisposed then
+				callbackContext = SiK.UI.Namespace.context(self, self._sikWindowOptions,
+					"reflow", self:contentRect())
+			end
+		end
+		self._sikModalReflowing = nil
+		if callbackContext then
+			consumerOnReflow(callbackContext)
+		end
+		return self
+	end
+end
+
 function Modal.apply(panel, options)
 	options = options or {}
+	options.owner = options.owner or panel._sikModalOwner
+	if options.playerNum == nil then
+		options.playerNum = options.owner and options.owner.playerNum or panel.playerNum
+	end
 	options.profile = options.profile or modalProfile(options.kind)
 	if options.resizable == nil then options.resizable = false end
 	options.focusPriority = tonumber(options.focusPriority) or 80
-	local applied, err = SiK.UI.Window.apply(panel, options)
+	local windowOptions, consumerOnReflow = deferredWindowOptions(options)
+	local applied, err = SiK.UI.Window.apply(panel, windowOptions)
 	if not applied then return nil, err end
 	applied._sikModal = true
 	applied._sikModalKind = options.kind or "compact"
@@ -267,17 +316,7 @@ function Modal.apply(panel, options)
 		return nil, contentRect
 	end
 	applied.childParent = applied.contentHost
-	local originalReflow = applied.reflow
-	applied.reflow = function(self)
-		originalReflow(self)
-		local rect = self:contentRect()
-		if self._sikModalContentMode == "dock" then
-			SiK.UI.Layout.apply(self.contentHost, { x = rect.x, y = rect.y, w = rect.w, h = rect.h })
-		elseif self.contentBlock then
-			self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
-		end
-		return self
-	end
+	installModalReflow(applied, applied.reflow, consumerOnReflow)
 	if not applied._sikModalDisposeWrapped then
 		applied._sikModalDisposeWrapped = true
 		local originalDispose = applied.dispose
@@ -307,7 +346,8 @@ function Modal.create(options)
 	windowOptions.minWidth = windowOptions.minWidth or Modal.WIDTH_MIN
 	windowOptions.maxWidth = windowOptions.maxWidth or Modal.WIDTH_MAX
 	windowOptions.resizable = windowOptions.resizable == true
-	local panel = SiK.UI.Window.create(windowOptions)
+	local deferredOptions, consumerOnReflow = deferredWindowOptions(windowOptions)
+	local panel = SiK.UI.Window.create(deferredOptions)
 	panel._sikModal = true
 	panel._sikModalKind = kind
 	panel._sikModalOwner = options.owner
@@ -319,17 +359,7 @@ function Modal.create(options)
 			x = contentRect.x, y = contentRect.y, w = contentRect.w, h = contentRect.h,
 		}, panel)
 	end
-	local originalReflow = panel.reflow
-	panel.reflow = function(self)
-		originalReflow(self)
-		local rect = self:contentRect()
-		if self._sikModalContentMode == "dock" then
-			SiK.UI.Layout.apply(self.contentHost, { x = rect.x, y = rect.y, w = rect.w, h = rect.h })
-		elseif self.contentBlock and self.contentBlock.setBounds then
-			self.contentBlock:setBounds(rect.x, rect.y, rect.w, rect.h)
-		end
-		return self
-	end
+	installModalReflow(panel, panel.reflow, consumerOnReflow)
 	local originalDispose = panel.dispose
 	panel.dispose = function(self)
 		if self._sikModalDisposed then return false end
@@ -364,6 +394,7 @@ function Modal.show(panel, focusControl)
 	if panel._sikModalOwner then bindOwner(panel, panel._sikModalOwner) end
 	if panel.setAlwaysOnTop then panel:setAlwaysOnTop(true) end
 	panel:show()
+	SiK.UI.FocusStack.activate(panel, panel.playerNum)
 	if focusControl then
 		if focusControl.focus then focusControl:focus()
 		elseif focusControl.javaObject and focusControl.javaObject.focus then

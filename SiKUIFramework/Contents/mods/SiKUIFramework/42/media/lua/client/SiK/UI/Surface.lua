@@ -18,7 +18,7 @@ local layoutModes = { flow = true, row = true, column = true, grid = true,
 local layoutNames = { x = true, y = true, width = true, height = true,
 	["min-width"] = true, ["min-height"] = true, ["max-width"] = true,
 	["max-height"] = true, gap = true, padding = true, grow = true, shrink = true,
-	columns = true, span = true, align = true, ["align-x"] = true, ["align-y"] = true,
+	columns = true, ["stack-below"] = true, span = true, align = true, ["align-x"] = true, ["align-y"] = true,
 	["vertical-align"] = true, justify = true, clip = true, fill = true }
 
 local function identifier(value)

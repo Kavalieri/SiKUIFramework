@@ -92,6 +92,36 @@ function FocusStack.isTop(owner, playerNum)
 	return layer ~= nil and layer.owner == owner
 end
 
+--- Makes an installed visible layer the newest peer without changing its band.
+function FocusStack.activate(owner, playerNum)
+	local stack = stackFor(playerNum, false)
+	if not stack then return false end
+	for index = 1, #stack do
+		local layer = stack[index]
+		if layer.owner == owner and isVisible(layer) then
+			sequence = sequence + 1
+			layer.sequence = sequence
+			return true
+		end
+	end
+	return false
+end
+
+local function windowOf(owner)
+	local current, visited = owner, {}
+	while type(current) == "table" and not visited[current] do
+		visited[current] = true
+		if current._sikWindowApplied then return current end
+		current = current._sikFocusOwner or current._sikModalOwner or current.parent
+	end
+	return nil
+end
+
+function FocusStack.activeWindow(playerNum)
+	local layer = FocusStack.top(playerNum)
+	return layer and windowOf(layer.owner) or nil
+end
+
 function FocusStack.handleEscape(playerNum)
 	local layer = FocusStack.top(playerNum)
 	if not layer then return false end

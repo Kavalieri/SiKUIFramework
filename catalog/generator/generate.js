@@ -106,6 +106,11 @@ function htmlForNode(node, definitions, translations, tokens, profiles, rules, d
   attributes.push(`data-layout-overrides="${escapeHtml(JSON.stringify(node.layout.overrides))}"`);
   const baseCss = layoutCss(node.layout, tokens, node.layout.base);
   if (baseCss) rules.push(`[data-sik-node="${node.id}"]{${baseCss}}`);
+  const stackBinding = node.layout.base.find((binding) => binding.name === "stack-below");
+  const stackBelow = stackBinding && layoutLiteral(stackBinding.value, tokens);
+  if (typeof stackBelow === "number" && node.layout.mode === "row") {
+    rules.push(`@media (max-width:${stackBelow}px){[data-sik-node="${node.id}"]{flex-direction:column}[data-sik-node="${node.id}"]>*{width:100%;flex-basis:auto}}`);
+  }
   node.layout.overrides.forEach((override) => {
     const profile = profiles.get(override.profileId);
     if (profile) rules.push(`@media (min-width:${profile.minViewportWidth}px) and (min-height:${profile.minViewportHeight}px){[data-sik-node="${node.id}"]{${layoutCss(node.layout, tokens, override.bindings)}}}`);

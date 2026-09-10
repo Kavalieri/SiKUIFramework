@@ -37,7 +37,24 @@ local function controlArgs(parent, options)
 		options = parent or {}
 		parent = options.parent
 	end
-	return parent, options or {}
+	options = options or {}
+	local supplied = options.theme
+	local context = type(supplied) == "table" and supplied._sikThemeContext == true
+		and supplied or SiK.UI.Theme.context(parent, supplied, options.playerNum)
+	-- A malformed legacy map still follows the former token fallback. Valid maps
+	-- become live contexts and are not cloned as ordinary colour overrides.
+	if context then options.theme = context end
+	return parent, options
+end
+
+local function bindTheme(widget, options, apply)
+	local context = options and options.theme
+	if type(context) ~= "table" or context._sikThemeContext ~= true then return widget end
+	widget._sikThemeContext = context
+	SiK.UI.Theme.bind(widget, context, apply or function(self, liveContext)
+		self._sikThemeContext = liveContext
+	end)
+	return widget
 end
 
 local function removeChild(widget)
@@ -51,6 +68,9 @@ end
 local function decorate(widget, kind, options)
 	widget._sikUiControl = kind
 	widget.playerNum = math.max(0, math.floor(n(options.playerNum, 0)))
+	if type(options.theme) == "table" and options.theme._sikThemeContext == true then
+		widget._sikThemeContext = options.theme
+	end
 	widget.payload = options.payload
 	widget._sikTooltipHandle = nil
 	if options.tooltip ~= nil then
@@ -71,6 +91,7 @@ local function decorate(widget, kind, options)
 	widget.dispose = function(self)
 		if self._sikDisposed then return false end
 		self._sikDisposed = true
+		SiK.UI.Theme.bind(self, nil)
 		if self._sikTooltipHandle then self._sikTooltipHandle:dispose() end
 		if type(previousDispose) == "function" and previousDispose ~= self.dispose then
 			pcall(previousDispose, self)
@@ -308,38 +329,69 @@ end
 
 local function applyButtonTheme(button, options)
 	local theme = SiK.UI.Theme.tokens(options.theme)
-	local background = options.danger and theme.danger
+	local danger = options.danger == true
+	local background = danger and theme.dangerButtonFill
 		or (options.success and theme.success
 			or (options.active and theme.selected or theme.surfaceAlt))
+	local hover = danger and theme.dangerButtonFill or theme.hover
+	local pressed = danger and theme.dangerButtonFill or theme.pressed
+	local border = danger and theme.dangerButtonBorder or theme.border
+	local text = danger and theme.dangerButtonText or theme.text
 	-- ISButton renders textColor unconditionally whenever it is enabled.  Own
 	-- each table so no consumer can leave a shared vanilla control with nil
 	-- colour fields or mutate a theme token.
 	button.backgroundColor = { r = background.r, g = background.g,
-		b = background.b, a = background.a }
-	button.backgroundColorMouseOver = { r = theme.hover.r, g = theme.hover.g,
-		b = theme.hover.b, a = theme.hover.a }
-	button.backgroundColorClicked = { r = theme.pressed.r, g = theme.pressed.g,
-		b = theme.pressed.b, a = theme.pressed.a }
-	button.borderColor = { r = theme.border.r, g = theme.border.g,
-		b = theme.border.b, a = theme.border.a }
-	button.textColor = { r = theme.text.r, g = theme.text.g,
-		b = theme.text.b, a = theme.text.a }
+		b = background.b, a = 0.88 }
+	button.backgroundColorMouseOver = { r = hover.r, g = hover.g, b = hover.b, a = 0.88 }
+	button.backgroundColorClicked = { r = pressed.r, g = pressed.g, b = pressed.b, a = 0.88 }
+	button.borderColor = { r = border.r, g = border.g, b = border.b, a = border.a }
+	button.textColor = { r = text.r, g = text.g, b = text.b, a = text.a }
+	button._sikButtonChromeCache = {
+		backgroundColor = { r = button.backgroundColor.r, g = button.backgroundColor.g,
+			b = button.backgroundColor.b, a = button.backgroundColor.a },
+		backgroundColorMouseOver = { r = button.backgroundColorMouseOver.r,
+			g = button.backgroundColorMouseOver.g, b = button.backgroundColorMouseOver.b,
+			a = button.backgroundColorMouseOver.a },
+		backgroundColorClicked = { r = button.backgroundColorClicked.r,
+			g = button.backgroundColorClicked.g, b = button.backgroundColorClicked.b,
+			a = button.backgroundColorClicked.a },
+		borderColor = { r = button.borderColor.r, g = button.borderColor.g,
+			b = button.borderColor.b, a = button.borderColor.a },
+		textColor = { r = button.textColor.r, g = button.textColor.g,
+			b = button.textColor.b, a = button.textColor.a },
+	}
 	button._sikLocked = options.locked == true
         return button
+end
+
+local function completeColor(value)
+	return type(value) == "table" and type(value.r) == "number"
+		and type(value.g) == "number" and type(value.b) == "number" and type(value.a) == "number"
+end
+
+local function repairButtonChrome(button)
+	local cache = button._sikButtonChromeCache
+	if type(cache) ~= "table" then return button end
+	for field, color in pairs(cache) do
+		if not completeColor(button[field]) then
+			button[field] = { r = color.r, g = color.g, b = color.b, a = color.a }
+		end
+	end
+	return button
 end
 
 -- A product may keep a vanilla button it owns, but it must not be able to
 -- leave that button in a state that ISButton cannot render.  Vanilla reads
 -- textColor.r without a nil guard.  Keep the repair at the framework boundary
--- and run it immediately before prerender too, so an accidental later
--- assignment cannot blank the whole terminal on the next frame.
+-- and repair only malformed later assignments before prerender. Palette work
+-- belongs to creation, explicit state setters, and Theme.bind notifications.
 local function ensureButtonRenderSafety(button, options)
         button._sikButtonChromeOptions = options or {}
         if button._sikButtonChromeInstalled then return button end
         button._sikButtonChromeInstalled = true
         local basePrerender = button.prerender
         button.prerender = function(self, ...)
-                applyButtonTheme(self, self._sikButtonChromeOptions or {})
+			repairButtonChrome(self)
                 if type(basePrerender) == "function" then
                         return basePrerender(self, ...)
                 end
@@ -351,12 +403,31 @@ end
 --- Product controls can preserve their vanilla callback signature.  This also
 --- repairs a missing textColor, which vanilla renders without a nil guard.
 function Controls.styleButton(button, options)
-        if type(button) ~= "table" then return nil, "invalid_button" end
-        options = options or {}
-        applyButtonTheme(button, options)
-        ensureButtonRenderSafety(button, options)
+	if type(button) ~= "table" then return nil, "invalid_button" end
+	options = options or {}
+	local parent = button.parent
+	local supplied = options.theme
+	local context = type(supplied) == "table" and supplied._sikThemeContext == true
+		and supplied or SiK.UI.Theme.context(parent, supplied, options.playerNum or button.playerNum)
+	if context then options.theme = context end
+	applyButtonTheme(button, options)
+	ensureButtonRenderSafety(button, options)
+	bindTheme(button, options, function(widget)
+		applyButtonTheme(widget, options)
+	end)
         button._sikUiControl = "button"
 	button._sikUiButtonStyled = true
+	return button
+end
+
+--- Toggles the calm destructive-button chrome without changing semantic
+--- danger colours used by status renderers.
+function Controls.setDanger(button, value)
+	if type(button) ~= "table" or type(button._sikButtonChromeOptions) ~= "table" then
+		return nil, "unstyled_button"
+	end
+	button._sikButtonChromeOptions.danger = value == true
+	applyButtonTheme(button, button._sikButtonChromeOptions)
 	return button
 end
 
@@ -366,15 +437,26 @@ end
 function Controls.styleField(entry, options)
 	if type(entry) ~= "table" then return nil, "invalid_field" end
 	options = options or {}
+	local parent = entry.parent
+	local supplied = options.theme
+	local context = type(supplied) == "table" and supplied._sikThemeContext == true
+		and supplied or SiK.UI.Theme.context(parent, supplied, options.playerNum or entry.playerNum)
+	if context then options.theme = context end
 	local theme = SiK.UI.Theme.tokens(options.theme)
 	entry.backgroundColor = { r = theme.surface.r, g = theme.surface.g,
-		b = theme.surface.b, a = theme.surface.a }
+		b = theme.surface.b, a = 0.88 }
 	entry.borderColor = { r = theme.border.r, g = theme.border.g,
 		b = theme.border.b, a = theme.border.a }
 	entry.textColor = { r = theme.text.r, g = theme.text.g,
 		b = theme.text.b, a = theme.text.a }
 	entry._sikUiControl = "field"
 	entry._sikUiInputStyled = true
+	bindTheme(entry, options, function(widget)
+		local live = SiK.UI.Theme.tokens(options.theme)
+		widget.backgroundColor = { r = live.surface.r, g = live.surface.g, b = live.surface.b, a = 0.88 }
+		widget.borderColor = { r = live.border.r, g = live.border.g, b = live.border.b, a = live.border.a }
+		widget.textColor = { r = live.text.r, g = live.text.g, b = live.text.b, a = live.text.a }
+	end)
 	return entry
 end
 
@@ -384,15 +466,26 @@ end
 function Controls.styleCombo(combo, options)
 	if type(combo) ~= "table" then return nil, "invalid_combo" end
 	options = options or {}
+	local parent = combo.parent
+	local supplied = options.theme
+	local context = type(supplied) == "table" and supplied._sikThemeContext == true
+		and supplied or SiK.UI.Theme.context(parent, supplied, options.playerNum or combo.playerNum)
+	if context then options.theme = context end
 	local theme = SiK.UI.Theme.tokens(options.theme)
 	combo.backgroundColor = { r = theme.surface.r, g = theme.surface.g,
-		b = theme.surface.b, a = theme.surface.a }
+		b = theme.surface.b, a = 0.88 }
 	combo.borderColor = { r = theme.border.r, g = theme.border.g,
 		b = theme.border.b, a = theme.border.a }
 	combo.textColor = { r = theme.text.r, g = theme.text.g,
 		b = theme.text.b, a = theme.text.a }
 	combo._sikUiControl = "combo"
 	combo._sikUiInputStyled = true
+	bindTheme(combo, options, function(widget)
+		local live = SiK.UI.Theme.tokens(options.theme)
+		widget.backgroundColor = { r = live.surface.r, g = live.surface.g, b = live.surface.b, a = 0.88 }
+		widget.borderColor = { r = live.border.r, g = live.border.g, b = live.border.b, a = live.border.a }
+		widget.textColor = { r = live.text.r, g = live.text.g, b = live.text.b, a = live.text.a }
+	end)
 	return combo
 end
 
@@ -428,6 +521,7 @@ function Controls.panel(parent, options)
                 end
         end
         decorate(panel, options.controlId or "panel", options)
+	bindTheme(panel, options)
 	return attach(parent, panel)
 end
 
@@ -488,7 +582,8 @@ function Controls.button(parent, options)
 		if self._sikPressed then color = self.backgroundColorClicked
 		elseif self.isMouseOver and self:isMouseOver() then color = self.backgroundColorMouseOver end
 		if self.enable == false or options.locked == true then
-			color = SiK.UI.Theme.tokens(options.theme).background
+			local disabled = SiK.UI.Theme.tokens(options.theme).background
+			color = { r = disabled.r, g = disabled.g, b = disabled.b, a = 0.88 }
 		end
 		self:drawRect(0, 0, self.width, self.height, color.a, color.r, color.g, color.b)
 		local border = self.borderColor
@@ -517,6 +612,9 @@ function Controls.button(parent, options)
 	end
 	applyButtonTheme(button, options)
 	decorate(button, "button", options)
+	bindTheme(button, options, function(widget)
+		applyButtonTheme(widget, options)
+	end)
 	function button:setEnable(value)
 		self.enable = value ~= false
 		if not self.enable then self._sikPressed = false end
@@ -711,7 +809,7 @@ function Controls.field(parent, options)
         field.prerender = function(self)
                 local theme = SiK.UI.Theme.tokens(options.theme)
                 local fill = options.enabled == false and theme.background or theme.surface
-                self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
+                self:drawRect(0, 0, self.width, self.height, 0.88, fill.r, fill.g, fill.b)
                 self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
                         theme.border.r, theme.border.g, theme.border.b)
                 ISPanel.prerender(self)
@@ -810,6 +908,13 @@ function Controls.field(parent, options)
         field.entry = entry
         field:addChild(entry)
         decorate(field, "field", options)
+	bindTheme(field, options, function(widget)
+		widget._sikThemeContext = options.theme
+		local live = SiK.UI.Theme.tokens(options.theme)
+		if widget.entry then
+			widget.entry.textColor = { r = live.text.r, g = live.text.g, b = live.text.b, a = live.text.a }
+		end
+	end)
         local fieldDispose = field.dispose
         field.dispose = function(self)
                 if self.entry then
@@ -831,12 +936,14 @@ function Controls.combo(parent, options)
 		w = math.max(1, n(options.w or options.width, 160)),
 		h = math.max(1, n(options.h or options.height, Controls.metrics(options.profile).inputHeight)),
 		playerNum = options.playerNum, theme = options.theme, enabled = options.enabled,
-		maxVisibleRows = options.maxVisibleRows,
+		maxVisibleRows = options.maxVisibleRows, searchable = options.searchable == true,
+		searchPlaceholder = options.searchPlaceholder, placeholder = options.placeholder,
 		onChange = function(component, item)
 			return callback(component, options, "onChange", item)
 		end,
 	})
 	decorate(combo, "combo", options)
+	bindTheme(combo, options)
 	combo:setItems(options.items or options.options or {}, options.selected)
 	combo:setEnabled(options.enabled ~= false)
 	return attach(parent, combo)
@@ -899,7 +1006,9 @@ function Controls.search(parent, options)
 	panel._sikSearchDeadline = nil
 	panel._sikSearchLastEffective = false
 	panel._sikSearchDebounceMs = math.max(0, n(options.debounceMs, 180))
-	local buttonW = panel.height
+	local showButton = options.showButton ~= false
+	local buttonW = showButton and panel.height or 0
+	local buttonGap = showButton and metrics.controlGap or 0
 
 	local function cancelPending(self)
 		self._sikSearchDeadline = nil
@@ -937,17 +1046,17 @@ function Controls.search(parent, options)
 	end
 
 	panel.entry = Controls.field(panel, {
-		x = 0, y = 0, w = math.max(1, panel.width - buttonW - metrics.controlGap), h = panel.height,
+		x = 0, y = 0, w = math.max(1, panel.width - buttonW - buttonGap), h = panel.height,
 		text = options.text, placeholder = options.placeholder, playerNum = options.playerNum,
 		payload = options.payload, onChange = function() scheduleChange(panel) end,
 	})
 	panel.entry.onPressEnter = function() return submit(panel) end
-	panel.action = Controls.iconButton(panel, {
+	if showButton then panel.action = Controls.iconButton(panel, {
 		x = panel.width - buttonW, y = 0, w = buttonW, h = panel.height,
 		icon = options.icon, text = options.buttonText or "", tooltip = options.tooltip,
 		playerNum = options.playerNum, payload = options.payload,
 		onClick = function() return submit(panel) end,
-	})
+	}) end
 	local previousUpdate = panel.update
 	panel.update = function(self)
 		if type(previousUpdate) == "function" then previousUpdate(self) end
@@ -988,11 +1097,13 @@ function Controls.search(parent, options)
 	function panel:submit() return submit(self) end
 	function panel:setBounds(x, y, width, height)
 		self:setX(x); self:setY(y); self:setWidth(width); self:setHeight(height)
-		local actionW = height
+		local actionW = showButton and height or 0
 		self.entry:setX(0); self.entry:setY(0)
-		self.entry:setWidth(math.max(1, width - actionW - metrics.controlGap)); self.entry:setHeight(height)
-		self.action:setX(width - actionW); self.action:setY(0)
-		self.action:setWidth(actionW); self.action:setHeight(height)
+		self.entry:setWidth(math.max(1, width - actionW - buttonGap)); self.entry:setHeight(height)
+		if self.action then
+			self.action:setX(width - actionW); self.action:setY(0)
+			self.action:setWidth(actionW); self.action:setHeight(height)
+		end
 		return self
 	end
 	return attach(parent, panel)
@@ -1053,6 +1164,9 @@ function Controls.listOption(parent, options)
 	option.lines = {}
 	option.selected = selected
 	option.loading = loading
+	option.texture = SiK.UI.Icon.resolve(options.icon or options.texture)
+	local iconSize = math.max(1, n(options.iconSize, 32))
+	local iconGap = math.max(0, n(options.iconGap, 8))
 	local baseSetEnabled = option.setEnabled
 
 	local function syncState(self)
@@ -1066,10 +1180,11 @@ function Controls.listOption(parent, options)
 	local function reflow(self, width)
 		if width ~= nil then self:setWidth(math.max(1, n(width, self.width))) end
 		self.lines = Controls.wrapText(self.text,
-			math.max(1, self.width - padding * 2), font)
+			math.max(1, self.width - padding * 2 - (self.texture and (iconSize + iconGap) or 0)), font)
 		local lineHeight = fontHeight(font) + lineGap
 		self:setHeight(math.max(minHeight,
-			#self.lines * lineHeight - lineGap + padding * 2))
+			#self.lines * lineHeight - lineGap + padding * 2,
+			self.texture and (iconSize + padding * 2) or 0))
 		return syncState(self)
 	end
 	local previousRender = option.render
@@ -1078,15 +1193,22 @@ function Controls.listOption(parent, options)
 		local tone = (enabled and not loading) and "text" or "textMuted"
 		local color = SiK.UI.Theme.color(tone, options.theme)
 		local y = padding
+		local textX = padding
+		if self.texture then
+			SiK.UI.Icon.draw(self, self.texture, padding, math.floor((self.height - iconSize) / 2), iconSize, iconSize)
+			textX = textX + iconSize + iconGap
+		end
 		for index = 1, #self.lines do
-			self:drawText(self.lines[index], padding, y,
+			self:drawText(self.lines[index], textX, y,
 				color.r, color.g, color.b, color.a, font)
 			y = y + fontHeight(font) + lineGap
 		end
+		if type(options.afterRender) == "function" then options.afterRender(self) end
 	end
 	function option:setData(data)
 		data = data or {}
 		if data.text ~= nil then self.text = tostring(data.text) end
+		if data.icon ~= nil or data.texture ~= nil then self.texture = SiK.UI.Icon.resolve(data.icon or data.texture) end
 		if data.payload ~= nil then options.payload = data.payload
 		else options.payload = data end
 		self.payload = options.payload
@@ -1105,6 +1227,19 @@ function Controls.listOption(parent, options)
 	function option:reflow(width) return reflow(self, width) end
 	reflow(option, option.width)
 	return option
+end
+
+-- Pure intrinsic measurement shared by imperative and declarative statuses.
+function Controls.measureStatus(text, width, options)
+	options = options or {}
+	local framed = options.framed == true
+	local padX, padY = framed and 10 or 0, framed and 6 or 0
+	local leading = options.indicator == true and 16 or 0
+	local lineHeight = fontHeight(options.font or UIFont.Small) + 2
+	local lines = Controls.wrapText(tostring(text or ""),
+		math.max(1, n(width, 200) - padX * 2 - leading), options.font or UIFont.Small)
+	return { lines = lines, height = math.max(framed and 30 or lineHeight,
+		#lines * lineHeight + padY * 2) }
 end
 
 function Controls.status(parent, options)
@@ -1130,9 +1265,9 @@ function Controls.status(parent, options)
 		panel.statusColor = options.color
 		function panel:reflow(width)
 			if width then self:setWidth(math.max(1, n(width, self.width))) end
-			self.lines = Controls.wrapText(self.text, math.max(1, self.width - padX * 2 - leading),
-				options.font or UIFont.Small)
-			self:setHeight(math.max(framed and 30 or lineHeight, #self.lines * lineHeight + padY * 2))
+			local measured = Controls.measureStatus(self.text, self.width, options)
+			self.lines = measured.lines
+			self:setHeight(measured.height)
 			return self
 		end
 		function panel:setStatus(text, nextTone, nextColorValue)

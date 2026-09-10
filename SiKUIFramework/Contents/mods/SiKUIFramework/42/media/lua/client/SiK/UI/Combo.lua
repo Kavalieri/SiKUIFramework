@@ -2,6 +2,7 @@ require "SiK/UI/Namespace"
 require "SiK/UI/Theme"
 require "SiK/UI/Icon"
 require "SiK/UI/Popover"
+require "SiK/UI/Viewport"
 require "ISUI/ISPanel"
 
 local Combo = SiK.UI.Combo or {}
@@ -29,17 +30,67 @@ local function itemValue(item)
 	return item.id or item.key
 end
 
+local function itemDisabled(item)
+	return type(item) == "table" and (item.disabled == true or item.placeholder == true)
+end
+
+local function casefold(value)
+	-- Lua's lower is safe for byte strings. UTF-8 names without a Latin case
+	-- mapping remain literal, which is the required CJK behaviour.
+	return string.lower(tostring(value or ""))
+end
+
+local function matchesQuery(item, query)
+	if query == "" then return true end
+	return string.find(casefold(itemText(item)), query, 1, true) ~= nil
+end
+
+local function visibleEntries(owner, query)
+	local entries, lastGroup = {}, nil
+	for index = 1, #owner._sikItems do
+		local item = owner._sikItems[index]
+		if matchesQuery(item, query) then
+			local group = type(item) == "table" and (item.group or item.groupLabel) or nil
+			if group ~= nil and tostring(group) ~= "" and tostring(group) ~= lastGroup then
+				entries[#entries + 1] = { heading = true, text = tostring(item.groupLabel or group) }
+				lastGroup = tostring(group)
+			elseif group == nil or tostring(group) == "" then
+				lastGroup = nil
+			end
+			entries[#entries + 1] = { item = item, originalIndex = index,
+				disabled = itemDisabled(item) }
+		end
+	end
+	return entries
+end
+
 local function drawArrow(panel, x, y)
 	return SiK.UI.Icon.drawRotatedExact(panel, "sik.arrow.right.14",
 		x, y, 14, 14, 90)
 end
 
+local function drawClippedText(panel, text, x, y, width, color)
+	if width <= 0 then return end
+	local stencil = type(panel.setStencilRect) == "function"
+	if stencil then panel:setStencilRect(x, 0, width, panel.height) end
+	panel:drawText(tostring(text or ""), x, y, color.r, color.g, color.b, color.a, UIFont.Small)
+	if stencil and panel.clearStencilRect then panel:clearStencilRect() end
+end
+
 local function createPopup(owner, options)
 	local rowHeight = math.max(24, n(options.rowHeight, owner.height))
-	local visibleRows = math.max(1, math.min(#owner._sikItems,
-		math.floor(n(options.maxVisibleRows, 9))))
-	local popup = ISPanel:new(0, 0, owner.width,
-		math.max(rowHeight, visibleRows * rowHeight + 2))
+	local maxRows = math.max(1, math.floor(n(options.maxVisibleRows, 9)))
+	local searchable = options.searchable == true and type(SiK.UI.Controls) == "table"
+		and type(SiK.UI.Controls.search) == "function"
+	local inputHeight = searchable and rowHeight or 0
+	local entries = visibleEntries(owner, "")
+	local safe = SiK.UI.Viewport.safe(owner.playerNum, options.environment, 8)
+	local popupWidth = math.max(1, math.min(owner.width, safe.w))
+	local maximumRows = math.max(1, math.floor(math.max(0, safe.h - inputHeight - 2) / rowHeight))
+	local visibleRows = math.max(1, math.min(#entries, maxRows, maximumRows))
+	local popupHeight = math.max(rowHeight, inputHeight + visibleRows * rowHeight + 2)
+	popupHeight = math.max(1, math.min(popupHeight, safe.h))
+	local popup = ISPanel:new(0, 0, popupWidth, popupHeight)
 	popup:initialise()
 	if popup.instantiate then popup:instantiate() end
 	popup.drawBackground = false
@@ -47,38 +98,62 @@ local function createPopup(owner, options)
 	popup.rowHeight = rowHeight
 	popup.offset = 0
 	popup.playerNum = owner.playerNum
+	popup._sikVisibleEntries = entries
+	popup._sikSearchQuery = ""
 	popup._sikUiComponent = "combo-popup"
+
+	function popup:visibleRowCount()
+		return math.max(1, math.floor((self.height - inputHeight - 2) / self.rowHeight))
+	end
+
+	function popup:rebuildVisible(query)
+		self._sikSearchQuery = casefold(query)
+		self._sikVisibleEntries = visibleEntries(self.owner, self._sikSearchQuery)
+		local maximum = math.max(0, #self._sikVisibleEntries - self:visibleRowCount())
+		self.offset = math.max(0, math.min(maximum, self.offset))
+		return self
+	end
+
+	if searchable then
+		popup.search = SiK.UI.Controls.search(popup, {
+			x = 0, y = 0, w = popup.width, h = inputHeight, text = "",
+			placeholder = tostring(options.searchPlaceholder or ""), minChars = 0, wideMinChars = 0,
+			debounceMs = 0, showButton = false, playerNum = owner.playerNum, theme = options.theme,
+			onChange = function(context) popup:rebuildVisible(context.value) end,
+		})
+	end
 
 	function popup:prerender()
 		local theme = SiK.UI.Theme.tokens(options.theme)
-		self:drawRect(0, 0, self.width, self.height, theme.surface.a,
+		self:drawRect(0, 0, self.width, self.height, 0.88,
 			theme.surface.r, theme.surface.g, theme.surface.b)
-		local visible = math.max(1, math.floor((self.height - 2) / self.rowHeight))
+		local visible = self:visibleRowCount()
 		for row = 1, visible do
 			local index = self.offset + row
-			local item = self.owner._sikItems[index]
-			if item ~= nil then
-				local y = 1 + (row - 1) * self.rowHeight
+			local entry = self._sikVisibleEntries[index]
+			if entry ~= nil then
+				local y = inputHeight + 1 + (row - 1) * self.rowHeight
 				local pointerY = self:getMouseY()
 				local hovered = self:isMouseOver() and pointerY >= y
 					and pointerY < y + self.rowHeight
-				local fill = index == self.owner.selected and theme.selected
+				local fill = not entry.heading and entry.originalIndex == self.owner.selected and theme.selected
 					or (hovered and theme.hover or nil)
 				if fill then self:drawRect(1, y, self.width - 2, self.rowHeight,
 					fill.a, fill.r, fill.g, fill.b) end
 				local textY = y + math.floor((self.rowHeight - fontHeight(UIFont.Small)) / 2)
-				self:drawText(itemText(item), 9, textY, theme.text.r, theme.text.g,
-					theme.text.b, theme.text.a, UIFont.Small)
+				local tone = (entry.heading or entry.disabled) and theme.textMuted or theme.text
+				drawClippedText(self, entry.heading and entry.text or itemText(entry.item), 9,
+					textY, self.width - 18, tone)
 			end
 		end
-		if #self.owner._sikItems > visible then
+		if #self._sikVisibleEntries > visible then
 			local trackX = self.width - 6
-			self:drawRect(trackX, 3, 3, self.height - 6, theme.background.a,
+			self:drawRect(trackX, inputHeight + 3, 3, self.height - inputHeight - 6, theme.background.a,
 				theme.background.r, theme.background.g, theme.background.b)
-			local thumbH = math.max(10, math.floor((self.height - 6) * visible
-				/ #self.owner._sikItems))
-			local maxOffset = math.max(1, #self.owner._sikItems - visible)
-			local thumbY = 3 + math.floor((self.height - 6 - thumbH) * self.offset / maxOffset)
+			local trackH = self.height - inputHeight - 6
+			local thumbH = math.max(10, math.floor(trackH * visible / #self._sikVisibleEntries))
+			local maxOffset = math.max(1, #self._sikVisibleEntries - visible)
+			local thumbY = inputHeight + 3 + math.floor((trackH - thumbH) * self.offset / maxOffset)
 			self:drawRect(trackX, thumbY, 3, thumbH, theme.accent.a,
 				theme.accent.r, theme.accent.g, theme.accent.b)
 		end
@@ -87,19 +162,30 @@ local function createPopup(owner, options)
 	end
 
 	function popup:onMouseWheel(delta)
-		local visible = math.max(1, math.floor((self.height - 2) / self.rowHeight))
-		local maximum = math.max(0, #self.owner._sikItems - visible)
+		local visible = self:visibleRowCount()
+		local maximum = math.max(0, #self._sikVisibleEntries - visible)
 		self.offset = math.max(0, math.min(maximum, self.offset + (delta > 0 and 1 or -1)))
 		return true
 	end
 
 	function popup:onMouseUp(_, y)
-		local row = math.floor((y - 1) / self.rowHeight) + 1
+		if y < inputHeight then return true end
+		local row = math.floor((y - inputHeight - 1) / self.rowHeight) + 1
 		local index = self.offset + row
-		if index >= 1 and index <= #self.owner._sikItems then
-			self.owner:setSelected(index, true)
+		local entry = self._sikVisibleEntries[index]
+		if entry and not entry.heading and not entry.disabled then
+			self.owner:setSelected(entry.originalIndex, true)
 			if self.owner._sikPopover then self.owner._sikPopover:close("selection") end
 		end
+		return true
+	end
+
+	local popupDispose = popup.dispose
+	function popup:dispose()
+		if self._sikComboPopupDisposed then return false end
+		self._sikComboPopupDisposed = true
+		if self.search then self.search:dispose(); self.search = nil end
+		if type(popupDispose) == "function" then return popupDispose(self) end
 		return true
 	end
 
@@ -116,19 +202,22 @@ function Combo.create(options)
 	panel.drawBackground = false
 	panel.playerNum = math.max(0, math.floor(n(options.playerNum, 0)))
 	panel._sikItems, panel.options, panel.selected = {}, {}, 0
+	panel._sikSearchable = options.searchable == true
+	panel._sikPlaceholder = options.placeholder ~= nil and tostring(options.placeholder) or nil
 	panel.enable = options.enabled ~= false
 	panel._sikUiComponent = "combo"
 
 	function panel:prerender()
 		local theme = SiK.UI.Theme.tokens(options.theme)
 		local fill = self.enable and theme.surface or theme.background
-		self:drawRect(0, 0, self.width, self.height, fill.a, fill.r, fill.g, fill.b)
+		self:drawRect(0, 0, self.width, self.height, 0.88, fill.r, fill.g, fill.b)
 		self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
 			theme.border.r, theme.border.g, theme.border.b)
 		local item = self._sikItems[self.selected]
-		local color = self.enable and theme.text or theme.textMuted
+		local color = self.enable and (item and theme.text or theme.textMuted) or theme.textMuted
 		local y = math.floor((self.height - fontHeight(UIFont.Small)) / 2)
-		self:drawText(itemText(item), 9, y, color.r, color.g, color.b, color.a, UIFont.Small)
+		local label = item and itemText(item) or (self._sikPlaceholder or "")
+		drawClippedText(self, label, 9, y, self.width - 34, color)
 		local arrowY = math.floor((self.height - 14) / 2)
 		drawArrow(self, self.width - 22, arrowY)
 	end
@@ -151,33 +240,54 @@ function Combo.create(options)
 	end
 
 	function panel:setItems(items, selected)
+		if self._sikPopover and self._sikPopover:getActive() then
+			self._sikPopover:close("items-replaced")
+		end
 		self:clear()
 		for index = 1, #(items or {}) do
 			local item = items[index]
 			self._sikItems[index] = item
 			self.options[index] = itemText(item)
 		end
-		self.selected = #self._sikItems > 0 and 1 or 0
-		if selected ~= nil then self:setSelected(selected, false) end
+		self.selected = 0
+		if selected ~= nil then self:setSelected(selected, false)
+		elseif self._sikPlaceholder == nil and not self._sikSearchable then
+			for index = 1, #self._sikItems do
+				if not itemDisabled(self._sikItems[index]) then self.selected = index; break end
+			end
+		end
 		return self
 	end
 
 	function panel:setSelected(value, emit)
+		if value == false then
+			self.selected = 0
+			return self
+		end
 		local selected = tonumber(value)
-		if selected then selected = math.max(1, math.min(#self._sikItems, math.floor(selected)))
+		if selected and selected <= 0 then
+			self.selected = 0
+			return self
+		elseif selected then selected = math.max(1, math.min(#self._sikItems, math.floor(selected)))
 		else
 			for index = 1, #self._sikItems do
 				if itemValue(self._sikItems[index]) == value then selected = index; break end
 			end
 		end
-		if selected then self.selected = selected end
-		if emit == true and type(options.onChange) == "function" then
+		local accepted = selected and self._sikItems[selected] ~= nil
+			and not itemDisabled(self._sikItems[selected])
+		if accepted then self.selected = selected end
+		if accepted and emit == true and type(options.onChange) == "function" then
 			options.onChange(self, self._sikItems[self.selected])
 		end
 		return self
 	end
 
 	function panel:getSelectedItem() return self._sikItems[self.selected] end
+	function panel:setPlaceholderText(value)
+		self._sikPlaceholder = tostring(value or "")
+		return self
+	end
 	function panel:setEnabled(value)
 		self.enable = value ~= false
 		if not self.enable and self._sikPopover then self._sikPopover:close("disabled") end

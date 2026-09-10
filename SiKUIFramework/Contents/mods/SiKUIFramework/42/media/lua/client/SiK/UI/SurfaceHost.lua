@@ -12,6 +12,7 @@ end
 
 local function snapshot(value, seen)
 	if type(value) ~= "table" then return value end
+	if value._sikThemeContext == true then return value end
 	if getmetatable(value) ~= nil then return value end
 	seen = seen or {}
 	if seen[value] then return seen[value] end

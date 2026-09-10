@@ -40,7 +40,7 @@ local function createTableRoot(options)
 		x = options.x or 0, y = options.y or 0,
 		w = options.w or options.width or 0,
 		h = options.h or options.height or 0,
-		padding = 0, background = false, border = false,
+		padding = 0, background = false, border = false, theme = options.theme,
 		playerNum = options.playerNum, controlId = "table",
 	})
 	if not container then return nil, reason end
@@ -137,6 +137,19 @@ local function blockContentOwner(parent)
 		return SiK.UI.Block.contentOwner(parent)
 	end
 	return nil, nil
+end
+
+local function blockAncestors(parent)
+	local blocks, seen, current, depth = {}, {}, parent, 0
+	while type(current) == "table" and depth < 64 do
+		local block = current._sikUiBlock
+		if type(block) == "table" and not block.disposed and not seen[block] then
+			seen[block] = true
+			blocks[#blocks + 1] = block
+		end
+		current, depth = current.parent, depth + 1
+	end
+	return blocks
 end
 
 local function normalizedColumns(columns)
@@ -846,6 +859,9 @@ function TableInstance:_projectParent(parent, out)
 			visualKey = selection.id, semantic = selection, parentKey = parent.key,
 			sourceIndex = childIndex, hasChildren = false }
 	end
+	-- A single-page hierarchy needs no navigation row. Keeping it visible adds
+	-- noise and consumes the height of a real data row without any possible act.
+	if state.pageCount <= 1 then return end
 	local label = nil
 	if self.pagination and type(self.pagination.labelOf) == "function" then
 		label = self.pagination.labelOf(state, parent.item, parent.key, self)
@@ -1114,6 +1130,18 @@ end
 
 function TableInstance:getHeight() return self.root.h end
 
+-- Snapshot of the current page/expansion order, independent of virtual row
+-- recycling. Data references belong to the consumer; synthetic pagers do not.
+function TableInstance:getVisibleDataRows()
+	local rows = {}
+	if self.disposed then return rows end
+	for i = 1, #self.projectedRows do
+		local projected = self.projectedRows[i]
+		if projected.kind ~= "pager" and projected.data ~= nil then rows[#rows + 1] = projected.data end
+	end
+	return rows
+end
+
 function TableInstance:layout(spec)
 	if self.disposed then return nil, "disposed" end
 	if type(spec) ~= "table" then return nil, "invalid_layout" end
@@ -1372,6 +1400,11 @@ end
 function TableInstance:dispose()
 	if self.disposed then return false end
 	self.disposed = true
+	for index = 1, #(self.blocks or {}) do
+		local block = self.blocks[index]
+		if block and block._tableUnmounted then block:_tableUnmounted() end
+	end
+	self.blocks = {}
 	if self.header and self.header.setCapture then self.header:setCapture(false) end
 	if self.rootListener then self.root:unsubscribe(self.rootListener) end
 	if self.root and self.root.block and self.blockListener then
@@ -1469,7 +1502,8 @@ function Table.create(options)
 	-- A caller cannot opt into a fake embedded mode.  The physical ancestry is
 	-- the contract: without a real declarative Block content host, no table is
 	-- created and therefore no orphan panel can be painted.
-	local block = blockContentOwner(options.parent)
+	local blocks = blockAncestors(options.parent)
+	local block = blocks[1] or blockContentOwner(options.parent)
 	if options.embedded ~= true or not block then return nil, "table_requires_block" end
 	local columns, columnsReason = normalizedColumns(options.columns)
 	if not columns then return nil, "invalid_columns:" .. tostring(columnsReason) end
@@ -1556,7 +1590,9 @@ function Table.create(options)
 			labelOf = options.pagination.labelOf,
 		} or nil,
 		pagerButtonWidth = math.max(12, numberOr(options.pagerButtonWidth, 24)),
-		page = 1, pageState = nil, options = options, colors = SiK.UI.Theme.tokens(options.theme),
+		page = 1, pageState = nil, options = options,
+		colors = SiK.UI.Theme.tokens(root.panel._sikThemeContext or options.theme),
+		themeContext = root.panel._sikThemeContext, blocks = blocks,
 		paddingX = paddingX, paddingY = paddingY,
 		sortKey = options.sortKey, sortAsc = options.sortAsc ~= false,
 		onColumnResize = options.onColumnResize, onSort = type(options.onSort) == "function" and options.onSort or nil,
@@ -1564,6 +1600,13 @@ function Table.create(options)
 		playerNum = math.max(0, math.floor(numberOr(options.playerNum, 0))),
 		disposed = false, _sikUiComponent = "table" }, TableInstance)
 	root.panel._sikUiTable = instance
+	function instance:_refreshTheme(context)
+		self.colors = SiK.UI.Theme.tokens(context or self.themeContext or self.options.theme)
+		return self
+	end
+	SiK.UI.Theme.bind(root.panel, instance.themeContext, function(_, context)
+		instance:_refreshTheme(context)
+	end)
 	header._sikUiComponent = "tableHeader"
 	scroll.viewport._sikUiComponent = "tableViewport"
 	scroll.host._sikUiComponent = "tableRows"
@@ -1699,6 +1742,9 @@ function Table.create(options)
 		detach(root.panel, pager) detach(root.panel, emptyPanel)
 		root:dispose() return nil, listReason end
 	instance.list = list
+	for index = 1, #blocks do
+		if blocks[index]._tableMounted then blocks[index]:_tableMounted() end
+	end
 	instance.rootListener = function() instance:_syncGeometry() end
 	root:subscribe(instance.rootListener)
 	if root.directBlock then instance.blockListener = block:subscribe(function()

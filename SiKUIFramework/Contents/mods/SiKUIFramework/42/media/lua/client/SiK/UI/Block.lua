@@ -220,14 +220,59 @@ function BlockInstance:getTrackRect()
 	return copyRect(self.trackRect)
 end
 
+--- Material changes are lifecycle-driven by Theme.bind and table mount/unmount;
+--- no visual tree is searched while a panel is rendering.
+function BlockInstance:_refreshMaterial(context)
+	if self.disposed or not self.panel then return self end
+	context = context or self.panel._sikThemeContext
+	if self.variant == "plain" or self.variant == "transparent" then
+		self.panel._sikMaterial = SiK.UI.Theme.resolveMaterial("transparent",
+			self.parent and self.parent._sikMaterial or nil, nil, context)
+		self.panel.drawBackground = false
+		self.panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+		self.panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+		return self
+	end
+	local overrides = type(self.background) == "table" and { surface = self.background } or nil
+	local material = SiK.UI.Theme.resolveMaterial("surface",
+		self.parent and self.parent._sikMaterial or nil, overrides, context)
+	if self._sikTableCount > 0 then
+		local surface = SiK.UI.Theme.tokens(context).surface
+		material.paint = SiK.UI.Theme.normalizeColor(surface, material.paint)
+		material.paint.a = 1
+		material.effective = SiK.UI.Theme.normalizeColor(material.paint, material.paint)
+	end
+	self.panel._sikMaterial = material
+	self.panel.drawBackground = true
+	self.panel.backgroundColor = SiK.UI.Theme.normalizeColor(material.paint, material.paint)
+	local tokens = SiK.UI.Theme.tokens(context)
+	self.panel.borderColor = SiK.UI.Theme.normalizeColor(self.border, tokens.border)
+	return self
+end
+
+function BlockInstance:_tableMounted()
+	if self.disposed then return end
+	self._sikTableCount = self._sikTableCount + 1
+	return self:_refreshMaterial()
+end
+
+function BlockInstance:_tableUnmounted()
+	if self.disposed then return end
+	self._sikTableCount = math.max(0, self._sikTableCount - 1)
+	return self:_refreshMaterial()
+end
+
 --- Compose intrinsic content in the canonical Block rectangle. Widgets are
 --- adopted by the Block, never painted as siblings behind its frame.
-function BlockInstance:beginColumn()
+function BlockInstance:beginColumn(options)
+	options = options or {}
 	local owner = self
 	local rect = self:getContentRect()
 	local tokens = SiK.UI.Metrics.tokens(self.metrics)
 	local column = SiK.UI.Layout.column({ x = rect.x, y = rect.y, w = rect.w,
-		gap = tokens.spacing.sm, position = function(widget, x, y, w, h)
+		parent = self.childParent, metrics = self.metrics,
+		gap = tokens.spacing.sm, retain = options.retain == true,
+		position = function(widget, x, y, w, h)
 			local panel = widget.panel or widget
 			if panel.parent ~= owner.childParent then
 				if panel.parent and panel.parent.removeChild then panel.parent:removeChild(panel) end
@@ -243,8 +288,11 @@ function BlockInstance:beginColumn()
 			else
 				local block = panel._sikUiBlock
 				if block then block:setBounds(x, y, w, h)
-				else SiK.UI.Layout.apply(panel, { x = x, y = y,
-					w = w or panel.width, h = h or panel.height }) end
+				else
+					SiK.UI.Layout.apply(panel, { x = x, y = y,
+						w = w or panel.width, h = h or panel.height })
+					if options.retain == true and panel.reflow then panel:reflow(w, h) end
+				end
 			end
 		end })
 	column.parent = self.childParent
@@ -254,6 +302,7 @@ function BlockInstance:beginColumn()
 		owner:setBounds(owner.x, owner.y, owner.w, height)
 		return height
 	end
+	if options.retain == true then self._sikColumn = column end
 	return column
 end
 
@@ -266,8 +315,13 @@ function BlockInstance:setBounds(x, y, w, h)
 	if self.x == nextX and self.y == nextY and self.w == nextW and self.h == nextH then
 		return self
 	end
+	local widthChanged = self.w ~= nextW
 	self.x, self.y, self.w, self.h = nextX, nextY, nextW, nextH
 	self:_sync("bounds")
+	if widthChanged and self._sikColumn and not self._sikColumn.replaying then
+		self._sikColumn:reflow(self:getContentRect())
+		self._sikColumn:finish()
+	end
 	return self
 end
 
@@ -288,6 +342,22 @@ function BlockInstance:reflow(bounds, y, w, h)
 			bounds.w or bounds.width, bounds.h or bounds.height)
 	end
 	return self:setBounds(bounds, y, w, h)
+end
+
+--- Content changed at the same width: replay the retained tree once, bottom-up.
+--- This recalculates geometry without rebuilding controls or querying models.
+function BlockInstance:refreshLayout()
+	if self.disposed or not self._sikColumn or self._sikColumn.replaying then return self end
+	for _, entry in ipairs(self._sikColumn.entries or {}) do
+		if entry.method == "block" then
+			local widget = entry.args[1]
+			local child = widget and (widget._sikColumn and widget or widget._sikUiBlock)
+			if child and child ~= self and child.refreshLayout then child:refreshLayout() end
+		end
+	end
+	self._sikColumn:reflow(self:getContentRect())
+	self._sikColumn:finish()
+	return self
 end
 
 function BlockInstance:setReserved(top, bottom)
@@ -340,6 +410,8 @@ end
 function BlockInstance:dispose()
 	if self.disposed then return end
 	self.disposed = true
+	self._sikColumn = nil
+	self._sikTableCount = 0
 	if self.scroll and self.ownsScroll and self.scroll.dispose then self.scroll:dispose() end
 	self.scroll = nil
 	self.listeners = {}
@@ -359,26 +431,19 @@ function Block.create(options)
 	local w = math.max(0, tonumber(options.w or options.width) or 0)
 	local h = math.max(0, tonumber(options.h or options.height) or 0)
 	local variant = options.variant or "standard"
-	local background, border = false, false
-	if variant ~= "plain" and variant ~= "transparent" then
-		local theme = SiK.UI.Theme.tokens(options.theme)
-		-- SiK UI supplies the canonical result by default. The reusable framework
-		-- still accepts deliberate overrides; products that want the standard
-		-- simply omit them and cannot drift between otherwise equivalent blocks.
-		background = options.background or theme.surface
-		border = options.border or theme.border
-	end
+	local metrics = SiK.UI.Metrics.inherit(options.parent, options.metrics)
 	local container, err = SiK.UI.Container.create({ parent = options.parent,
 		x = x, y = y, w = w, h = h, padding = 0,
-		background = background, border = border,
-		accent = options.accent,
+		metrics = metrics,
+		theme = options.theme, background = false, border = false,
+		accent = options.accent, accentTone = options.accentTone,
 		playerNum = options.playerNum, controlId = "block" })
 	if not container then return nil, err end
 	local panel = container.panel
 	local hasHeader = options.title ~= nil or options.tooltip ~= nil
 		or options.info ~= nil or options.leadingIndicator ~= nil or options.actions ~= nil
 	local controlMetrics = SiK.UI.Controls.metrics(options.profile)
-	local metricTokens = SiK.UI.Metrics.tokens(options.metrics)
+	local metricTokens = metrics
 	local headerHeight = hasHeader and math.max(1,
 		tonumber(options.headerHeight) or controlMetrics.rowHeight) or 0
 	local headerGap = hasHeader and math.max(0,
@@ -396,12 +461,16 @@ function Block.create(options)
 		headerReservedTop = headerReservedTop,
 		headerHeight = headerHeight,
 		headerY = math.max(0, tonumber(options.paddingY)
-			or SiK.UI.Metrics.tokens(options.metrics).block.padding),
+			or metrics.block.padding),
 		reservedBottom = math.max(0, tonumber(options.reservedBottom) or 0),
 		fill = options.fill == true,
 		scrollable = options.scrollable == true,
 		contentHeight = math.max(0, tonumber(options.contentHeight) or 0),
-		metrics = options.metrics,
+		metrics = metrics,
+		variant = variant,
+		background = options.background,
+		border = options.border,
+		_sikTableCount = 0,
 		paddingX = options.paddingX,
 		paddingY = options.paddingY,
 		listeners = {},
@@ -409,6 +478,12 @@ function Block.create(options)
 	}, BlockInstance)
 	panel._sikUiComponent = "block"
 	panel._sikUiBlock = instance
+	SiK.UI.Theme.bind(panel, panel._sikThemeContext, function(_, context)
+		instance:_refreshMaterial(context)
+		if instance.container and instance.container.refreshAccent then
+			instance.container:refreshAccent(context)
+		end
+	end)
 	if hasHeader then
 		instance.header = SiK.UI.Controls.blockHeader(panel, {
 			x = 0, y = 0, w = math.max(1, w), h = headerHeight,
