@@ -4,7 +4,7 @@ local Version = SiK.UI.Version or {
 	major = 1,
 	minor = 0,
 	patch = 2,
-	stage = "dev1.2",
+	stage = "dev1.3",
 }
 
 function Version.string()

@@ -274,12 +274,9 @@ function Window.resolveBounds(options)
 	local height = math.max(minH, math.min(maxH, n(options.h or options.height, spec.height)))
 	local x = n(options.x, safe.x + math.floor((safe.w - width) / 2))
 	local y = n(options.y, safe.y + math.floor((safe.h - height) / 2))
-	local closeWidth = math.max(20, n(options.closeSize, 32))
-	if options.closable == false or options.close == false then closeWidth = 0 end
 	local clamped = SiK.UI.Viewport.clampAccessible({ x = x, y = y, w = width, h = height },
 		playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
-			headerHeight = n(options.headerHeight, 52), headerWidth = n(options.headerReachWidth, 96),
-			padding = n(options.padding, 12), closeWidth = closeWidth,
+			headerHeight = n(options.headerHeight, 52), headerWidth = n(options.headerReachWidth, 32),
 		})
 	clamped.minWidth, clamped.minHeight = minW, minH
 	clamped.maxWidth, clamped.maxHeight = maxW, maxH
@@ -290,13 +287,9 @@ end
 function Window.clampBounds(panel, rect)
 	if type(panel) ~= "table" then return nil, "invalid_window" end
 	local options = panel._sikWindowOptions or {}
-	local closeWidth = panel.closeControl and rectValue(panel.closeControl, "width", "getWidth")
-		or math.max(20, n(options.closeSize, 32))
-	if options.closable == false or options.close == false then closeWidth = 0 end
 	return SiK.UI.Viewport.clampAccessible(rect, panel.playerNum, options.environment,
 		n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
-			headerHeight = panel.headerHeight, headerWidth = n(options.headerReachWidth, 96),
-			padding = panel.windowPadding, closeWidth = closeWidth,
+			headerHeight = panel.headerHeight, headerWidth = n(options.headerReachWidth, 32),
 		})
 end
 
@@ -400,13 +393,10 @@ function Window.resolveInitialPosition(options, bounds)
 	local compact = options.profile == "compact"
 	local shifted = { x = bounds.x + (compact and 32 or 54),
 		y = bounds.y + (compact and 32 or 48), w = bounds.w, h = bounds.h }
-	local closeWidth = math.max(20, n(options.closeSize, 32))
-	if options.closable == false or options.close == false then closeWidth = 0 end
 	local clamped = SiK.UI.Viewport.clampAccessible(shifted, bounds.playerNum,
 		options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
 			headerHeight = n(options.headerHeight, 52),
-			headerWidth = n(options.headerReachWidth, 96),
-			padding = n(options.padding, 12), closeWidth = closeWidth,
+			headerWidth = n(options.headerReachWidth, 32),
 		})
 	for key, value in pairs(bounds) do if clamped[key] == nil then clamped[key] = value end end
 	return clamped
@@ -662,12 +652,30 @@ local function installFooterTooltip(panel, value)
 	control:initialise()
 	if control.instantiate then control:instantiate() end
 	control.drawBackground = false
+	control.drawBorder = false
+	control.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	control.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	control.onMouseDown = function() return false end
 	control.onMouseUp = function() return false end
 	panel:addChild(control)
 	panel.footerTooltipControl = control
+	local lines = {}
+	if type(value) == "table" then
+		for index = 1, #value do
+			local line = displayValue(value[index], "\n")
+			if line ~= "" then lines[#lines + 1] = line end
+		end
+	else
+		for line in string.gmatch(panel._sikFooterTooltipText .. "\n", "([^\r\n]*)[\r\n]+") do
+			if line ~= "" then lines[#lines + 1] = line end
+		end
+	end
 	panel._sikFooterTooltipHandle = SiK.UI.Tooltip.attach(control, {
-		text = panel._sikFooterTooltipText, playerNum = panel.playerNum,
+		text = panel._sikFooterTooltipText,
+		content = { text = panel._sikFooterTooltipText },
+		sections = { { lines = lines, framed = false } },
+		variant = "transient", kind = "descriptive", replace = true,
+		playerNum = panel.playerNum,
 		placement = "above", maxWidth = panel._sikWindowOptions.footerTooltipMaxWidth,
 		channel = "window-footer",
 	})

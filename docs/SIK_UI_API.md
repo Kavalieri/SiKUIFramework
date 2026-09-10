@@ -79,6 +79,12 @@ geometry cascades only when it overlaps a visible SiK Window for that player:
 `positionAnchor` and `viewportAnchor` always take precedence. Menus and
 popovers do not use this Window option.
 
+Dragged Windows may be parked almost completely beyond either horizontal edge.
+The shared clamp keeps a 32 px header grip visible so the player can recover
+the Window; it does not force the close control to remain on screen. A versions
+footer paints one internal top divider. Its hover hitbox is transparent and its
+descriptive tooltip preserves each supplied component as an explicit row.
+
 ## Retained editor geometry and transient ownership
 
 `Layout.column({retain=true, ...})` records placement operations;
@@ -193,7 +199,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.2`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2-dev1.3`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
