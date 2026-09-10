@@ -79,8 +79,11 @@ function FocusStack.top(playerNum)
 	if not stack then return nil end
 	for index = 1, #stack do
 		local layer = stack[index]
-		if isVisible(layer) and (not best or layer.priority > best.priority
-			or (layer.priority == best.priority and layer.sequence > best.sequence)) then
+		-- Every visible layer joins with a monotonic opening sequence, and an
+		-- explicit activation receives a newer one.  This makes a clicked window
+		-- the Escape target even when another visible layer chose a higher legacy
+		-- band; priority remains descriptive compatibility metadata only.
+		if isVisible(layer) and (not best or layer.sequence > best.sequence) then
 			best = layer
 		end
 	end

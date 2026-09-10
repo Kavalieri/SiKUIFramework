@@ -792,14 +792,23 @@ function Controls.field(parent, options)
         local metrics = Controls.metrics(options.profile)
         local inset = math.max(0, math.floor(n(options.textInset or options.contentInset,
                 metrics.controlGap)))
+        local iconSize = math.max(1, math.floor(n(options.iconSize, 18)))
+        local iconPadding = math.max(0, math.floor(n(options.iconPadding, 4)))
+        local iconInset = iconSize + iconPadding * 2
+        local leadingInset = options.leadingIcon and math.max(inset, iconInset) or inset
+        local trailingInset = options.trailingActionIcon and math.max(inset, iconInset) or inset
         local field = ISPanel:new(n(options.x, 0), n(options.y, 0),
                 math.max(1, n(options.w or options.width, 160)),
                 math.max(1, n(options.h or options.height, metrics.inputHeight)))
         field:initialise(); field.drawBackground = false
         field._sikTextInset = inset
+        field._sikTextInsetLeft = leadingInset
+        field._sikTextInsetRight = trailingInset
+        field._sikTrailingInset = trailingInset
+        field._sikTrailingVisible = options.trailingActionVisible == true
         field._sikUiControl = "field"
-        local entry = ISTextEntryBox:new(tostring(options.text or ""), inset, 0,
-                math.max(1, field.width - inset * 2), field.height)
+        local entry = ISTextEntryBox:new(tostring(options.text or ""), leadingInset, 0,
+                math.max(1, field.width - leadingInset - trailingInset), field.height)
         entry:initialise()
 	-- ISTextEntryBox:setEditable delegates to its Java text box.  Project
 	-- Zomboid only creates that object from instantiate(), not initialise().
@@ -808,10 +817,19 @@ function Controls.field(parent, options)
 	if entry.instantiate then entry:instantiate() end
         field.prerender = function(self)
                 local theme = SiK.UI.Theme.tokens(options.theme)
-                local fill = options.enabled == false and theme.background or theme.surface
+                local enabled = options.enabled ~= false
+                local focused = self.entry and ((type(self.entry.isFocused) == "function"
+                        and self.entry:isFocused())
+                        or self.entry.focused == true)
+                local hovered = self.isMouseOver and self:isMouseOver()
+                local fill = not enabled and theme.background
+                        or (options.statefulChrome and (focused and theme.surfaceAlt
+                                or (hovered and theme.hover or theme.surface)))
+                        or theme.surface
                 self:drawRect(0, 0, self.width, self.height, 0.88, fill.r, fill.g, fill.b)
-                self:drawRectBorder(0, 0, self.width, self.height, theme.border.a,
-                        theme.border.r, theme.border.g, theme.border.b)
+                local border = options.statefulChrome and focused and theme.accent or theme.border
+                self:drawRectBorder(0, 0, self.width, self.height, border.a,
+                        border.r, border.g, border.b)
                 ISPanel.prerender(self)
         end
         local basePrerender = entry.prerender
@@ -847,6 +865,9 @@ function Controls.field(parent, options)
         function field:setEnabled(value)
                 options.enabled = value ~= false
                 if entry.setEditable then entry:setEditable(options.enabled) end
+                if self.trailingAction and self.trailingAction.setEnabled then
+                        self.trailingAction:setEnabled(options.enabled)
+                end
                 return self
         end
         function field:setEditable(value) return self:setEnabled(value) end
@@ -885,10 +906,21 @@ function Controls.field(parent, options)
         entry.onTextChange = function() return field:onTextChange() end
         entry.onPressEnter = function() return field:onPressEnter() end
         local function reflow(self)
-                entry:setX(self._sikTextInset)
+                entry:setX(self._sikTextInsetLeft)
                 entry:setY(0)
-                entry:setWidth(math.max(1, self.width - self._sikTextInset * 2))
+                entry:setWidth(math.max(1, self.width - self._sikTextInsetLeft
+                        - self._sikTextInsetRight))
                 entry:setHeight(self.height)
+                if self.leadingIcon then
+                        self.leadingIcon:setX(iconPadding)
+                        self.leadingIcon:setY(math.floor((self.height - iconSize) / 2))
+                        self.leadingIcon:setWidth(iconSize); self.leadingIcon:setHeight(iconSize)
+                end
+                if self.trailingAction then
+                        self.trailingAction:setX(self.width - iconInset + iconPadding)
+                        self.trailingAction:setY(math.floor((self.height - iconSize) / 2))
+                        self.trailingAction:setWidth(iconSize); self.trailingAction:setHeight(iconSize)
+                end
                 return self
         end
         local baseSetWidth, baseSetHeight = field.setWidth, field.setHeight
@@ -907,6 +939,37 @@ function Controls.field(parent, options)
         end
         field.entry = entry
         field:addChild(entry)
+        if options.leadingIcon then
+                field.leadingIcon = Controls.icon(field, {
+                        x = iconPadding, y = math.floor((field.height - iconSize) / 2),
+                        w = iconSize, h = iconSize, icon = options.leadingIcon,
+                        iconSize = iconSize, tone = "textMuted", playerNum = options.playerNum,
+                        theme = options.theme,
+                })
+        end
+        if options.trailingActionIcon then
+                field.trailingAction = Controls.iconButton(field, {
+                        x = field.width - iconInset + iconPadding,
+                        y = math.floor((field.height - iconSize) / 2), w = iconSize, h = iconSize,
+			icon = options.trailingActionIcon, iconSize = iconSize, iconPadding = 0,
+			chrome = false, enabled = options.enabled, playerNum = options.playerNum,
+			theme = options.theme, iconTint = SiK.UI.Theme.color("textMuted", options.theme),
+                        onClick = function()
+                                if options.enabled == false then return false end
+                                return callback(field, options, "onTrailingAction", field:getText())
+                        end,
+                })
+                field.trailingAction:setVisible(field._sikTrailingVisible)
+                if not field._sikTrailingVisible then field._sikTextInsetRight = inset end
+        end
+        function field:setTrailingActionVisible(value)
+                local visible = value == true
+                if not self.trailingAction then return self end
+                self._sikTrailingVisible = visible
+                self._sikTextInsetRight = visible and self._sikTrailingInset or inset
+                self.trailingAction:setVisible(visible)
+                return reflow(self)
+        end
         decorate(field, "field", options)
 	bindTheme(field, options, function(widget)
 		widget._sikThemeContext = options.theme
@@ -914,9 +977,14 @@ function Controls.field(parent, options)
 		if widget.entry then
 			widget.entry.textColor = { r = live.text.r, g = live.text.g, b = live.text.b, a = live.text.a }
 		end
+		if widget.trailingAction then
+			widget.trailingAction:setIconTint(live.textMuted)
+		end
 	end)
         local fieldDispose = field.dispose
         field.dispose = function(self)
+                if self.leadingIcon then self.leadingIcon:dispose(); self.leadingIcon = nil end
+                if self.trailingAction then self.trailingAction:dispose(); self.trailingAction = nil end
                 if self.entry then
                         self:removeChild(self.entry)
                         if self.entry.dispose then self.entry:dispose() end
@@ -1006,7 +1074,9 @@ function Controls.search(parent, options)
 	panel._sikSearchDeadline = nil
 	panel._sikSearchLastEffective = false
 	panel._sikSearchDebounceMs = math.max(0, n(options.debounceMs, 180))
-	local showButton = options.showButton ~= false
+	-- Search chrome is normally contained in the input.  The former exterior
+	-- submit button remains available only when a legacy caller requests it.
+	local showButton = options.showButton == true
 	local buttonW = showButton and panel.height or 0
 	local buttonGap = showButton and metrics.controlGap or 0
 
@@ -1030,8 +1100,12 @@ function Controls.search(parent, options)
 	end
 
 	local function scheduleChange(self)
+		if self._sikSearchSuppressChange then return false end
 		cancelPending(self)
 		self._sikSearchPendingText = self.entry and self.entry:getText() or ""
+		if self.entry and self.entry.setTrailingActionVisible then
+			self.entry:setTrailingActionVisible(self._sikSearchPendingText ~= "")
+		end
 		if self._sikSearchDebounceMs <= 0 then return emitChange(self) end
 		self._sikSearchDeadline = searchNow(self, options) + self._sikSearchDebounceMs
 		return false
@@ -1045,12 +1119,40 @@ function Controls.search(parent, options)
 		return callback(self, options, "onSubmit", text)
 	end
 
+	local function clear(self)
+		local text = self.entry and self.entry:getText() or ""
+		if text == "" then
+			if self.entry and self.entry.focus then self.entry:focus() end
+			return false
+		end
+		cancelPending(self)
+		self._sikSearchSuppressChange = true
+		self.entry:setText("")
+		self._sikSearchSuppressChange = false
+		self.entry:setTrailingActionVisible(false)
+		if self.entry.focus then self.entry:focus() end
+		-- Programmatic setText may notify the native text box on some PZ builds;
+		-- suppression above makes this the sole clear notification. Clearing must
+		-- reach the consumer even when the previous text was below its threshold.
+		self._sikSearchLastEffective = false
+		return callback(self, options, "onChange", "")
+	end
+
 	panel.entry = Controls.field(panel, {
 		x = 0, y = 0, w = math.max(1, panel.width - buttonW - buttonGap), h = panel.height,
 		text = options.text, placeholder = options.placeholder, playerNum = options.playerNum,
-		payload = options.payload, onChange = function() scheduleChange(panel) end,
+		enabled = options.enabled,
+		payload = options.payload, theme = options.theme, statefulChrome = true,
+		leadingIcon = options.searchIcon or "sik.search.18",
+		trailingActionIcon = options.clearIcon or "sik.close.18",
+		trailingActionVisible = tostring(options.text or "") ~= "",
+		onTrailingAction = function() return clear(panel) end,
+		onChange = function() scheduleChange(panel) end,
 	})
-	panel.entry.onPressEnter = function() return submit(panel) end
+	panel.entry.onPressEnter = function()
+		if options.enabled == false then return false end
+		return submit(panel)
+	end
 	if showButton then panel.action = Controls.iconButton(panel, {
 		x = panel.width - buttonW, y = 0, w = buttonW, h = panel.height,
 		icon = options.icon, text = options.buttonText or "", tooltip = options.tooltip,
@@ -1088,7 +1190,19 @@ function Controls.search(parent, options)
 		return searchDispose(self)
 	end
 	function panel:getText() return self.entry:getText() end
-	function panel:setText(value) self.entry:setText(tostring(value or "")); return self end
+	function panel:setText(value)
+		self.entry:setText(tostring(value or ""))
+		self.entry:setTrailingActionVisible(self.entry:getText() ~= "")
+		return self
+	end
+	function panel:clear() return clear(self) end
+	function panel:setEnabled(value)
+		options.enabled = value ~= false
+		self.entry:setEnabled(options.enabled)
+		if self.action and self.action.setEnabled then self.action:setEnabled(options.enabled) end
+		return self
+	end
+	function panel:setEditable(value) return self:setEnabled(value) end
 	function panel:cancelPending() return cancelPending(self) end
 	function panel:flushChange()
 		cancelPending(self)

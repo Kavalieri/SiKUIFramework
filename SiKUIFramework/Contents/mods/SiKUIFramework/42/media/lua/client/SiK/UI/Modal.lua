@@ -73,80 +73,18 @@ function Modal.raiseOwned(owner)
 	return raised
 end
 
-local function createOwnerBlocker(owner)
-	if not owner or not owner.addChild or not ISPanel then return nil end
-	local blocker = ISPanel:new(0, 0, math.max(1, owner.width or 1),
-		math.max(1, owner.height or 1))
-	blocker:initialise()
-	if blocker.instantiate then blocker:instantiate() end
-	blocker.background = false
-	blocker.border = false
-	blocker.moveWithMouse = false
-	blocker.onMouseDown = function() return true end
-	blocker.onMouseUp = function() return true end
-	blocker.onMouseUpOutside = function() return true end
-	blocker.onMouseMove = function() return true end
-	blocker.onMouseMoveOutside = function() return true end
-	blocker.onRightMouseDown = function() return true end
-	blocker.onRightMouseUp = function() return true end
-	blocker.onMouseWheel = function() return true end
-	local previousPrerender = blocker.prerender
-	blocker.prerender = function(self)
-		if self.setWidth then self:setWidth(math.max(1, owner.width or 1)) end
-		if self.setHeight then self:setHeight(math.max(1, owner.height or 1)) end
-		if previousPrerender then previousPrerender(self) end
-	end
-	owner:addChild(blocker)
-	if blocker.bringToTop then blocker:bringToTop() end
-	return blocker
-end
-
-local function disposeOwnerBlocker(binding)
-	local blocker = binding and binding.blocker or nil
-	if not blocker then return end
-	if blocker.setCapture then blocker:setCapture(false) end
-	if blocker.parent and blocker.parent.removeChild then blocker.parent:removeChild(blocker) end
-	if blocker.setVisible then blocker:setVisible(false) end
-	binding.blocker = nil
-end
-
 local function bindOwner(panel, owner)
 	if type(panel) ~= "table" or type(owner) ~= "table" or panel == owner then return false end
 	local binding = ownerBindings[owner]
 	if not binding then
-		binding = {
-			owner = owner,
-			children = {},
-			wasAlwaysOnTop = owner.isAlwaysOnTop and owner:isAlwaysOnTop() or false,
-			ownerBringToTop = owner.bringToTop,
-		}
+		binding = { owner = owner, children = {} }
 		ownerBindings[owner] = binding
-		-- Only the visible descendant keeps native always-on-top priority.  The
-		-- owner remains mounted, but this blocker absorbs every pointer path until
-		-- the last child closes.
-		if owner.setAlwaysOnTop then owner:setAlwaysOnTop(false) end
-		binding.blocker = createOwnerBlocker(owner)
-		-- Any native/UI activation of the owner must finish by restoring the
-		-- complete owner -> blocker -> child order.  Scope the wrapper to the
-		-- lifetime of the binding and restore the exact method afterwards.
-		if binding.ownerBringToTop then
-			owner.bringToTop = function(self, ...)
-				local current = ownerBindings[self]
-				local original = current and current.ownerBringToTop or binding.ownerBringToTop
-				if original then original(self, ...) end
-				if current and current.blocker and current.blocker.bringToTop then
-					current.blocker:bringToTop()
-				end
-				Modal.raiseOwned(self)
-			end
-		end
 	end
 	for index = 1, #binding.children do
 		if binding.children[index] == panel then return true end
 	end
 	binding.children[#binding.children + 1] = panel
 	panel._sikModalOwner = owner
-	if binding.blocker and binding.blocker.bringToTop then binding.blocker:bringToTop() end
 	return true
 end
 
@@ -158,9 +96,6 @@ unbindOwner = function(panel)
 		if binding.children[index] == panel then table.remove(binding.children, index) end
 	end
 	if #binding.children == 0 then
-		disposeOwnerBlocker(binding)
-		if owner.setAlwaysOnTop then owner:setAlwaysOnTop(binding.wasAlwaysOnTop == true) end
-		if binding.ownerBringToTop then owner.bringToTop = binding.ownerBringToTop end
 		ownerBindings[owner] = nil
 	end
 	panel._sikModalOwner = nil
@@ -177,11 +112,7 @@ end
 function Modal.raiseOwner(owner)
 	if not owner then return false end
 	local binding = ownerBindings[owner]
-	if binding then
-		if owner.bringToTop then owner:bringToTop(); return true end
-		if binding.blocker and binding.blocker.bringToTop then binding.blocker:bringToTop() end
-		return Modal.raiseOwned(owner)
-	end
+	if binding and owner.bringToTop then owner:bringToTop(); return true end
 	local raised = false
 	if owner.bringToTop then owner:bringToTop(); raised = true end
 	return Modal.raiseOwned(owner) or raised
@@ -392,7 +323,6 @@ function Modal.show(panel, focusControl)
 	local stack = stackFor(panel.playerNum, true)
 	stack[#stack + 1] = panel
 	if panel._sikModalOwner then bindOwner(panel, panel._sikModalOwner) end
-	if panel.setAlwaysOnTop then panel:setAlwaysOnTop(true) end
 	panel:show()
 	SiK.UI.FocusStack.activate(panel, panel.playerNum)
 	if focusControl then

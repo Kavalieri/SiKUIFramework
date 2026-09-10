@@ -342,6 +342,11 @@ before acceptance proceeds.
 filtering, scheduling or mutation; consumers retain their raw query separately
 so clearing, resizing and changing filters do not lose the entered value.
 
+`UI.Controls.search` places its search icon inside the field and exposes an
+interior clear action only while text is present. The clear action emits one
+immediate empty `onChange` notification. The former exterior submit button is
+created only with `showButton=true`; Enter continues to submit.
+
 ### Searchable combo
 
 `UI.Controls.combo(parent, { searchable=true, searchPlaceholder="Buscar",

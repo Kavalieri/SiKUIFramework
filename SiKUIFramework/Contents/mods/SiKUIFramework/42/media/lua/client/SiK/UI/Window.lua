@@ -214,6 +214,7 @@ local function declarativeFooter(options)
 	if visible == nil then visible = options.footerVisible ~= false end
 	return {
 		items = items,
+		tooltip = source.tooltip or options.footerTooltip,
 		align = source.align or options.footerAlign or "center",
 		insetLeft = source.insetLeft or options.footerInsetLeft or 0,
 		expandWhenTight = source.expandWhenTight == true or options.footerExpandWhenTight == true,
@@ -221,6 +222,20 @@ local function declarativeFooter(options)
 			or options.headerSeparator or " | ",
 		visible = visible,
 	}
+end
+
+local function footerTooltipText(value)
+	if value == nil then return "" end
+	if type(value) ~= "table" then return tostring(value) end
+	if value.text ~= nil or (value.label ~= nil and value.value ~= nil) then
+		return displayValue(value, "\n")
+	end
+	local lines = {}
+	for index = 1, #value do
+		local line = displayValue(value[index], "\n")
+		if line ~= "" then lines[#lines + 1] = line end
+	end
+	return table.concat(lines, "\n")
 end
 
 local function composeHeaderText(productName, contextName, separator)
@@ -259,12 +274,30 @@ function Window.resolveBounds(options)
 	local height = math.max(minH, math.min(maxH, n(options.h or options.height, spec.height)))
 	local x = n(options.x, safe.x + math.floor((safe.w - width) / 2))
 	local y = n(options.y, safe.y + math.floor((safe.h - height) / 2))
-	local clamped = SiK.UI.Viewport.clamp({ x = x, y = y, w = width, h = height },
-		playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin))
+	local closeWidth = math.max(20, n(options.closeSize, 32))
+	if options.closable == false or options.close == false then closeWidth = 0 end
+	local clamped = SiK.UI.Viewport.clampAccessible({ x = x, y = y, w = width, h = height },
+		playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
+			headerHeight = n(options.headerHeight, 52), headerWidth = n(options.headerReachWidth, 96),
+			padding = n(options.padding, 12), closeWidth = closeWidth,
+		})
 	clamped.minWidth, clamped.minHeight = minW, minH
 	clamped.maxWidth, clamped.maxHeight = maxW, maxH
 	clamped.playerNum = playerNum
 	return clamped
+end
+
+function Window.clampBounds(panel, rect)
+	if type(panel) ~= "table" then return nil, "invalid_window" end
+	local options = panel._sikWindowOptions or {}
+	local closeWidth = panel.closeControl and rectValue(panel.closeControl, "width", "getWidth")
+		or math.max(20, n(options.closeSize, 32))
+	if options.closable == false or options.close == false then closeWidth = 0 end
+	return SiK.UI.Viewport.clampAccessible(rect, panel.playerNum, options.environment,
+		n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
+			headerHeight = panel.headerHeight, headerWidth = n(options.headerReachWidth, 96),
+			padding = panel.windowPadding, closeWidth = closeWidth,
+		})
 end
 
 local constraintKeys = {
@@ -603,6 +636,38 @@ function Window.render(panel, phase)
 	return panel
 end
 
+local function removeFooterTooltip(panel)
+	if panel._sikFooterTooltipHandle then
+		panel._sikFooterTooltipHandle:dispose()
+		panel._sikFooterTooltipHandle = nil
+	end
+	if panel.footerTooltipControl then
+		if panel.removeChild then panel:removeChild(panel.footerTooltipControl) end
+		if panel.footerTooltipControl.dispose then panel.footerTooltipControl:dispose() end
+		panel.footerTooltipControl = nil
+	end
+end
+
+local function installFooterTooltip(panel, value)
+	panel._sikFooterTooltipText = footerTooltipText(value)
+	removeFooterTooltip(panel)
+	if panel._sikFooterTooltipText == "" then return panel end
+	local control = ISPanel:new(0, 0, 1, 1)
+	control:initialise()
+	if control.instantiate then control:instantiate() end
+	control.drawBackground = false
+	control.onMouseDown = function() return false end
+	control.onMouseUp = function() return false end
+	panel:addChild(control)
+	panel.footerTooltipControl = control
+	panel._sikFooterTooltipHandle = SiK.UI.Tooltip.attach(control, {
+		text = panel._sikFooterTooltipText, playerNum = panel.playerNum,
+		placement = "above", maxWidth = panel._sikWindowOptions.footerTooltipMaxWidth,
+		channel = "window-footer",
+	})
+	return panel
+end
+
 function Window.reflow(panel)
 	if type(panel) ~= "table" or type(panel._sikWindowOptions) ~= "table" then
 		return nil, "not_applied"
@@ -630,6 +695,14 @@ function Window.reflow(panel)
 	if panel.closeControl and rects.close then
 		panel.closeControl:setX(rects.close.x); panel.closeControl:setY(rects.close.y)
 		panel.closeControl:setWidth(rects.close.w); panel.closeControl:setHeight(rects.close.h)
+	end
+	if panel.footerTooltipControl then
+		panel.footerTooltipControl:setX(rects.footer.x)
+		panel.footerTooltipControl:setY(rects.footer.y)
+		panel.footerTooltipControl:setWidth(math.max(1, rects.footer.w))
+		panel.footerTooltipControl:setHeight(math.max(1, rects.footer.h))
+		panel.footerTooltipControl:setVisible(panel._sikFooterVisible
+			and panel._sikFooterText ~= "" and rects.footer.h > 0)
 	end
 	if type(panel._sikWindowOptions.onReflow) == "function" then
 		panel._sikWindowOptions.onReflow(SiK.UI.Namespace.context(panel,
@@ -687,9 +760,8 @@ local function installPointerHandlers(panel)
 		end
 		local gx, gy = globalPointer()
 		if active.mode == "drag" then
-			local clamped = SiK.UI.Viewport.clamp({ x = active.wx + gx - active.x,
-				y = active.wy + gy - active.y, w = self.width, h = self.height },
-				self.playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin))
+			local clamped = Window.clampBounds(self, { x = active.wx + gx - active.x,
+				y = active.wy + gy - active.y, w = self.width, h = self.height })
 			self:setX(clamped.x); self:setY(clamped.y)
 		else
 			self:setSize(active.w + gx - active.x, active.h + gy - active.y)
@@ -698,6 +770,7 @@ local function installPointerHandlers(panel)
 		return true
 	end
 	local downWrapper = function(self, x, y, ...)
+		if self.bringToTop then self:bringToTop() end
 		SiK.UI.FocusStack.activate(self, self.playerNum)
 		local gx, gy = globalPointer()
 		-- Keep the painted corner compact while exposing a more forgiving input
@@ -817,6 +890,7 @@ function Window.apply(panel, options)
 	panel._sikFooterItems = footer.items
 	panel._sikFooterSeparator = tostring(footer.separator)
 	panel._sikFooterText = displayValue(footer.items, panel._sikFooterSeparator)
+	panel._sikFooterTooltipText = footerTooltipText(footer.tooltip)
 	panel._sikFooterAlign = footer.align == "left" or footer.align == "right"
 		and footer.align or "center"
 	panel._sikFooterVerticalAlign = (footer.verticalAlign == "top"
@@ -897,6 +971,7 @@ function Window.apply(panel, options)
 			onClick = function() panel:close("button") end,
 		})
 	end
+	installFooterTooltip(panel, footer.tooltip)
 
 	local cleanupPointer = installPointerHandlers(panel)
 	local cleanupWheel = installWheelCapture(panel)
@@ -1024,7 +1099,7 @@ function Window.apply(panel, options)
 		Window.reflow(self)
 		return self
 	end
-	function panel:setFooterItems(items, align)
+	function panel:setFooterItems(items, align, deferReflow)
 		self._sikFooterItems = items
 		self._sikFooterText = displayValue(items, self._sikFooterSeparator)
 		self._sikFooterDisplayText = ""
@@ -1035,10 +1110,20 @@ function Window.apply(panel, options)
 			self.footerHeight = self._sikFooterVisible and self._sikFooterText ~= ""
 				and SiK.UI.Controls.metrics(options.profile).rowHeight or 0
 		end
+		if deferReflow ~= true then Window.reflow(self) end
+		return self
+	end
+	function panel:setVersions(versions, tooltipLines)
+		self:setFooterItems(versions, "center", true)
+		installFooterTooltip(self, tooltipLines)
 		Window.reflow(self)
 		return self
 	end
-	function panel:setVersions(versions) return self:setFooterItems(versions, "center") end
+	function panel:setFooterTooltip(tooltipLines)
+		installFooterTooltip(self, tooltipLines)
+		Window.reflow(self)
+		return self
+	end
 	function panel:setFooterVisible(value)
 		self._sikFooterVisible = value ~= false
 		if not self._sikFooterVisible then self._sikFooterDisplayText = "" end
@@ -1054,10 +1139,9 @@ function Window.apply(panel, options)
 	end
 	function panel:setSize(width, height)
 		local limits = self._sikBounds or bounds
-		local current = SiK.UI.Viewport.clamp({ x = self.x, y = self.y,
+		local current = Window.clampBounds(self, { x = self.x, y = self.y,
 			w = math.max(limits.minWidth, math.min(limits.maxWidth, n(width, self.width))),
-			h = math.max(limits.minHeight, math.min(limits.maxHeight, n(height, self.height))) },
-			self.playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin))
+			h = math.max(limits.minHeight, math.min(limits.maxHeight, n(height, self.height))) })
 		self:setX(current.x); self:setY(current.y)
 		self:setWidth(current.w); self:setHeight(current.h)
 		Window.reflow(self)
@@ -1107,12 +1191,13 @@ function Window.apply(panel, options)
 		cleanupPointer()
 		cleanupWheel()
 		if self.closeControl then self.closeControl:dispose(); self.closeControl = nil end
+		removeFooterTooltip(self)
 		if self.headerStatusControl then self.headerStatusControl:dispose(); self.headerStatusControl = nil end
 		if self.headerOperationControl then self.headerOperationControl:dispose(); self.headerOperationControl = nil end
 		if self.titleControl then self.titleControl:dispose(); self.titleControl = nil end
 		self._sikHeaderProduct, self._sikHeaderContext = nil, nil
 		self._sikHeaderText, self._sikFooterText = "", ""
-		self._sikFooterItems, self._sikWindowOptions = nil, nil
+		self._sikFooterItems, self._sikFooterTooltipText, self._sikWindowOptions = nil, nil, nil
 		if self.prerender == prerenderWrapper then self.prerender = previousPrerender end
 		if self.render == renderWrapper then self.render = previousRender end
 		if type(previousDispose) == "function" and previousDispose ~= self.dispose then

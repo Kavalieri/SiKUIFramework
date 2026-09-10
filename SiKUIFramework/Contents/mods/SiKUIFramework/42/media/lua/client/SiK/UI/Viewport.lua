@@ -104,4 +104,31 @@ function Viewport.clamp(rect, playerNum, environment, margin)
 	return { x = x, y = y, w = width, h = height }
 end
 
+-- A dragged window may extend past an edge, but retains a reachable header and
+-- close control. Ordinary surfaces keep using clamp(), which remains strict.
+function Viewport.clampAccessible(rect, playerNum, environment, margin, access)
+	local safe = Viewport.safe(playerNum, environment, margin)
+	local width = math.min(math.max(0, tonumber(rect and (rect.w or rect.width)) or 0), safe.w)
+	local height = math.min(math.max(0, tonumber(rect and (rect.h or rect.height)) or 0), safe.h)
+	local x = tonumber(rect and rect.x) or safe.x
+	local y = tonumber(rect and rect.y) or safe.y
+	access = type(access) == "table" and access or {}
+	local headerH = math.max(1, math.min(height, finite(access.headerHeight) or 1))
+	local headerW = math.max(1, math.min(width, finite(access.headerWidth) or 96))
+	local padding = math.max(0, finite(access.padding) or 0)
+	local closeW = math.max(0, math.min(width, finite(access.closeWidth) or 0))
+	local closeLeft = width - padding - closeW
+	local closeRight = width - padding
+	local minX = safe.x - width + headerW
+	local maxX = safe.x + safe.w - headerW
+	if closeW > 0 then
+		minX = math.max(minX, safe.x - closeLeft)
+		maxX = math.min(maxX, safe.x + safe.w - closeRight)
+	end
+	if minX > maxX then minX, maxX = safe.x, safe.x + safe.w - width end
+	x = math.max(minX, math.min(x, maxX))
+	y = math.max(safe.y, math.min(y, safe.y + safe.h - headerH))
+	return { x = x, y = y, w = width, h = height }
+end
+
 return Viewport

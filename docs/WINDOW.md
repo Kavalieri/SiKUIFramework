@@ -59,8 +59,8 @@ Built-in Window profiles are `terminal`, `compact`, `standard`, `wide`,
 `editor` and `task`.
 Each profile provides preferred, minimum and maximum dimensions plus viewport
 caps. The caller may provide `x`, `y`, `w`/`width`, `h`/`height`, or numeric
-profile overrides. All resulting geometry is clamped to the selected player's
-safe viewport.
+profile overrides. A window may extend beyond the selected player's safe
+viewport while its reachable header and close control remain visible.
 
 These are Window shell profiles, not the closed catalog-profile vocabulary or
 the complete Metrics density vocabulary. In particular, `staff` is accepted by
@@ -138,7 +138,7 @@ shared chrome regions continue to delegate to the consumer unchanged.
 
 ## Footer contract
 
-`options.footer` accepts `items` (or `versions`), `align`, `verticalAlign`,
+`options.footer` accepts `items` (or `versions`), `tooltip`, `align`, `verticalAlign`,
 `font`, `insetLeft`, `expandWhenTight`, `separator` and `visible`. Footer items may be strings,
 `{ text = ... }`, `{ label = ..., value = ... }`, or an ordered list of those
 forms. Horizontal alignment defaults to `center` and also supports `left` and
@@ -155,7 +155,8 @@ excluded from the footer text rectangle.
 Runtime updates use:
 
 - `window:setFooterItems(items [, align])`
-- `window:setVersions(items)` as a centered convenience
+- `window:setFooterTooltip(lines)` for a multiline tooltip over the footer
+- `window:setVersions(items [, tooltipLines])` as a centered convenience
 - `window:setFooterVisible(value)`
 
 ## Runtime lifecycle
