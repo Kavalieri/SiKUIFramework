@@ -79,11 +79,12 @@ function FocusStack.top(playerNum)
 	if not stack then return nil end
 	for index = 1, #stack do
 		local layer = stack[index]
-		-- Every visible layer joins with a monotonic opening sequence, and an
-		-- explicit activation receives a newer one.  This makes a clicked window
-		-- the Escape target even when another visible layer chose a higher legacy
-		-- band; priority remains descriptive compatibility metadata only.
-		if isVisible(layer) and (not best or layer.sequence > best.sequence) then
+		-- Bands describe the semantic close order.  Opening or activating a layer
+		-- only makes it the newest member of its own band, so a transient cannot
+		-- be displaced by a later terminal or staff window.
+		if isVisible(layer) and (not best
+			or layer.priority > best.priority
+			or (layer.priority == best.priority and layer.sequence > best.sequence)) then
 			best = layer
 		end
 	end
@@ -95,7 +96,7 @@ function FocusStack.isTop(owner, playerNum)
 	return layer ~= nil and layer.owner == owner
 end
 
---- Makes an installed visible layer the newest peer without changing its band.
+--- Makes an installed visible layer the newest peer in its current band.
 function FocusStack.activate(owner, playerNum)
 	local stack = stackFor(playerNum, false)
 	if not stack then return false end
