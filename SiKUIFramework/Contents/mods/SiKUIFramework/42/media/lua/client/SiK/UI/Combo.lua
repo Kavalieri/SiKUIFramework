@@ -65,13 +65,9 @@ local function visibleEntries(owner, query)
 end
 
 local function drawArrow(panel, x, y)
-	local drawn = SiK.UI.Icon.drawRotatedExact(panel, "sik.arrow.right.14",
-		x, y, 14, 14, 90)
-	if drawn then return true end
-	-- A few ISUI doubles and older renderer paths do not expose native
-	-- rotation. Preserve the canonical asset as a visible right-facing
-	-- disclosure affordance instead of silently losing the combo button.
-	return SiK.UI.Icon.drawExact(panel, "sik.arrow.right.14", x, y, 14, 14)
+	-- A down-facing asset avoids relying on DrawTextureAngle, which is absent
+	-- from some B42 render bridges and otherwise made this affordance vanish.
+	return SiK.UI.Icon.drawExact(panel, "sik.arrow.down.14", x, y, 14, 14)
 end
 
 local function drawClippedText(panel, text, x, y, width, color)

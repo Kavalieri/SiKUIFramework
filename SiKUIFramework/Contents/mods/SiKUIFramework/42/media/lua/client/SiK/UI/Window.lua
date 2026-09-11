@@ -277,6 +277,8 @@ function Window.resolveBounds(options)
 	local clamped = SiK.UI.Viewport.clampAccessible({ x = x, y = y, w = width, h = height },
 		playerNum, options.environment, n(options.safeMargin, SiK.UI.Metrics.safeMargin), {
 			headerHeight = n(options.headerHeight, 52), headerWidth = n(options.headerReachWidth, 32),
+			stripHeight = n(options.edgeParkingStripHeight, 32),
+			stripWidth = n(options.edgeParkingStripWidth, n(options.headerReachWidth, 32)),
 		})
 	clamped.minWidth, clamped.minHeight = minW, minH
 	clamped.maxWidth, clamped.maxHeight = maxW, maxH
@@ -284,18 +286,77 @@ function Window.resolveBounds(options)
 	return clamped
 end
 
+local function parkingAccess(options, headerHeight)
+	options = options or {}
+	return {
+		headerHeight = n(headerHeight, n(options.headerHeight, 52)),
+		headerWidth = n(options.headerReachWidth, 32),
+		stripHeight = n(options.edgeParkingStripHeight, 32),
+		stripWidth = n(options.edgeParkingStripWidth, n(options.headerReachWidth, 32)),
+	}
+end
+
+local function parkingMargin(options)
+	-- edgeParkingMargin was previously passed to Viewport as its safe margin.
+	-- Keep that opt-in behavior where callers have not moved to safeMargin.
+	if options.safeMargin == nil and options.edgeParkingMargin ~= nil then
+		return n(options.edgeParkingMargin, 0)
+	end
+	return n(options.safeMargin, 0)
+end
+
 function Window.clampBounds(panel, rect)
 	if type(panel) ~= "table" then return nil, "invalid_window" end
 	local options = panel._sikWindowOptions or {}
 	return SiK.UI.Viewport.clampAccessible(rect, panel.playerNum, options.environment,
-		n(options.edgeParkingMargin, 0), {
-			headerHeight = panel.headerHeight, headerWidth = n(options.headerReachWidth, 32),
-		})
+		parkingMargin(options), parkingAccess(options, panel.headerHeight))
+end
+
+function Window.recoveryStrip(panel)
+	if type(panel) ~= "table" then return nil, "invalid_window" end
+	local options = panel._sikWindowOptions or {}
+	local access = parkingAccess(options, panel.headerHeight)
+	local safe = SiK.UI.Viewport.safe(panel.playerNum, options.environment, parkingMargin(options))
+	local width = math.max(0, n(panel.width, panel.getWidth and panel:getWidth() or 0))
+	local height = math.max(0, n(panel.height, panel.getHeight and panel:getHeight() or 0))
+	local stripWidth = math.max(1, math.min(width, access.stripWidth))
+	local stripHeight = math.max(1, math.min(height, access.stripHeight))
+	local x = n(panel.x, panel.getX and panel:getX() or safe.x)
+	local y = n(panel.y, panel.getY and panel:getY() or safe.y)
+	if y < safe.y then
+		return { x = 0, y = math.max(0, height - stripHeight),
+			w = width,
+			h = stripHeight, edge = "top" }
+	end
+	if y >= safe.y + safe.h - stripHeight then
+		return { x = 0, y = 0, w = width, h = stripHeight, edge = "bottom" }
+	end
+	if x < safe.x then
+		return { x = math.max(0, width - stripWidth), y = 0,
+			w = stripWidth, h = height, edge = "left" }
+	end
+	if x >= safe.x + safe.w - stripWidth then
+		return { x = 0, y = 0, w = stripWidth, h = height, edge = "right" }
+	end
+	return nil
+end
+
+local function updateRecoveryControl(panel)
+	local control = panel and panel._sikRecoveryControl
+	if not control then return end
+	local strip = Window.recoveryStrip(panel)
+	if strip then
+		control:setX(strip.x); control:setY(strip.y)
+		control:setWidth(math.max(1, strip.w)); control:setHeight(math.max(1, strip.h))
+		if control.bringToTop then control:bringToTop() end
+	end
+	if control.setVisible then control:setVisible(strip ~= nil) end
 end
 
 local constraintKeys = {
 	"profile", "minWidth", "minHeight", "maxWidth", "maxHeight",
-	"capWidth", "capHeight", "safeMargin", "edgeParkingMargin", "environment", "playerNum",
+	"capWidth", "capHeight", "safeMargin", "edgeParkingMargin",
+	"edgeParkingStripHeight", "edgeParkingStripWidth", "environment", "playerNum",
 }
 
 function Window.updateConstraints(panel, overrides)
@@ -700,6 +761,7 @@ function Window.reflow(panel)
 		return nil, "not_applied"
 	end
 	local rects = Window.chromeRects(panel)
+	updateRecoveryControl(panel)
 	if panel.titleControl then
 		if panel._sikHeaderTitleParts then
 			panel._sikHeaderText = Window.composeHeaderTitle(panel._sikHeaderTitleParts,
@@ -795,9 +857,23 @@ local function installPointerHandlers(panel)
 		end
 		local gx, gy = globalPointer()
 		if active.mode == "drag" then
-			local clamped = Window.clampBounds(self, { x = active.wx + gx - active.x,
-				y = active.wy + gy - active.y, w = self.width, h = self.height })
+			local candidate = { x = active.wx + gx - active.x,
+				y = active.wy + gy - active.y, w = self.width, h = self.height }
+			local safe = SiK.UI.Viewport.safe(self.playerNum, options.environment, parkingMargin(options))
+			-- The system cursor cannot leave the viewport. Reaching a boundary is
+			-- therefore an explicit parking gesture instead of an unreachable
+			-- negative pointer coordinate.
+			if safe.w > 0 then
+				if gx <= safe.x then candidate.x = -math.huge
+				elseif gx >= safe.x + safe.w - 1 then candidate.x = math.huge end
+			end
+			if safe.h > 0 then
+				if gy <= safe.y then candidate.y = -math.huge
+				elseif gy >= safe.y + safe.h - 1 then candidate.y = math.huge end
+			end
+			local clamped = Window.clampBounds(self, candidate)
 			self:setX(clamped.x); self:setY(clamped.y)
+			updateRecoveryControl(self)
 		else
 			self:setSize(active.w + gx - active.x, active.h + gy - active.y)
 			notifyResize(self, "onResize", phase, active, false)
@@ -815,7 +891,11 @@ local function installPointerHandlers(panel)
 		local candidate = nil
 		if options.resizable ~= false and x >= self.width - handle and y >= self.height - handle then
 			candidate = { mode = "resize", x = gx, y = gy, w = self.width, h = self.height }
-		elseif options.draggable ~= false and y >= 0 and y <= self.headerHeight then
+		elseif options.draggable ~= false and (y >= 0 and y <= self.headerHeight
+			or (function()
+				local strip = Window.recoveryStrip(self)
+				return strip and y >= strip.y and y <= strip.y + strip.h
+			end)()) then
 			candidate = { mode = "drag", x = gx, y = gy, wx = self.x, wy = self.y }
 		end
 		if candidate and allowed(self, "canStartPointer", "pointerDown", candidate)
@@ -1010,6 +1090,33 @@ function Window.apply(panel, options)
 
 	local cleanupPointer = installPointerHandlers(panel)
 	local cleanupWheel = installWheelCapture(panel)
+	-- A parked edge can overlap controls (notably the close button at the left
+	-- edge). This transparent child is activated only while parked and relays
+	-- the same pointer contract, so every visible strip remains recoverable.
+	local recoveryControl = ISPanel:new(0, 0, 1, 1)
+	recoveryControl:initialise()
+	if recoveryControl.instantiate then recoveryControl:instantiate() end
+	recoveryControl.drawBackground, recoveryControl.drawBorder = false, false
+	recoveryControl.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	recoveryControl.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	recoveryControl.onMouseDown = function(self, x, y, ...)
+		return panel:onMouseDown(x + self.x, y + self.y, ...)
+	end
+	recoveryControl.onMouseMove = function(_, ...)
+		return panel:onMouseMove(...)
+	end
+	recoveryControl.onMouseMoveOutside = function(_, ...)
+		return panel:onMouseMoveOutside(...)
+	end
+	recoveryControl.onMouseUp = function(_, ...)
+		return panel:onMouseUp(...)
+	end
+	recoveryControl.onMouseUpOutside = function(_, ...)
+		return panel:onMouseUpOutside(...)
+	end
+	panel:addChild(recoveryControl)
+	panel._sikRecoveryControl = recoveryControl
+	updateRecoveryControl(panel)
 	-- Passive controls occupy part of the header and therefore receive the
 	-- pointer before the owning Window. Relay them through the same common
 	-- pointer contract so title/status chrome never disables drag. Interactive
@@ -1224,6 +1331,11 @@ function Window.apply(panel, options)
 		if focusLayer then focusLayer:dispose(); focusLayer = nil end
 		cleanupPointer()
 		cleanupWheel()
+		if self._sikRecoveryControl then
+			if self.removeChild then self:removeChild(self._sikRecoveryControl) end
+			if self._sikRecoveryControl.dispose then self._sikRecoveryControl:dispose() end
+			self._sikRecoveryControl = nil
+		end
 		if self.closeControl then self.closeControl:dispose(); self.closeControl = nil end
 		removeFooterTooltip(self)
 		if self.headerStatusControl then self.headerStatusControl:dispose(); self.headerStatusControl = nil end

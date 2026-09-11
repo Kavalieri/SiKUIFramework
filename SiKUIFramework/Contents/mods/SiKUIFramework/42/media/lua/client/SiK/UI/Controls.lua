@@ -823,8 +823,14 @@ function Controls.field(parent, options)
         local iconSize = math.max(1, math.floor(n(options.iconSize, 18)))
         local iconPadding = math.max(0, math.floor(n(options.iconPadding, 4)))
         local iconInset = iconSize + iconPadding * 2
+        local declaredTrailingWidth = math.max(1, math.floor(n(options.trailingActionWidth,
+                iconInset)))
+        local function trailingWidth(height)
+                if options.trailingActionWidth == "height" then return math.max(1, math.floor(height)) end
+                return declaredTrailingWidth
+        end
         local leadingInset = options.leadingIcon and math.max(inset, iconInset) or inset
-        local trailingInset = options.trailingActionIcon and math.max(inset, iconInset) or inset
+        local trailingInset = options.trailingActionIcon and math.max(inset, declaredTrailingWidth) or inset
         local field = ISPanel:new(n(options.x, 0), n(options.y, 0),
                 math.max(1, n(options.w or options.width, 160)),
                 math.max(1, n(options.h or options.height, metrics.inputHeight)))
@@ -950,6 +956,10 @@ function Controls.field(parent, options)
         entry.onTextChange = function() return field:onTextChange() end
         entry.onPressEnter = function() return field:onPressEnter() end
         local function reflow(self)
+		if self.trailingAction and self._sikTrailingVisible then
+			self._sikTrailingInset = math.max(inset, trailingWidth(self.height))
+			self._sikTextInsetRight = self._sikTrailingInset
+		end
                 entry:setX(self._sikTextInsetLeft)
                 entry:setY(0)
                 entry:setWidth(math.max(1, self.width - self._sikTextInsetLeft
@@ -961,9 +971,10 @@ function Controls.field(parent, options)
                         self.leadingIcon:setWidth(iconSize); self.leadingIcon:setHeight(iconSize)
                 end
                 if self.trailingAction then
-                        self.trailingAction:setX(self.width - iconInset + iconPadding)
-                        self.trailingAction:setY(math.floor((self.height - iconSize) / 2))
-                        self.trailingAction:setWidth(iconSize); self.trailingAction:setHeight(iconSize)
+                        local actionWidth = trailingWidth(self.height)
+                        self.trailingAction:setX(self.width - actionWidth)
+                        self.trailingAction:setY(0)
+                        self.trailingAction:setWidth(actionWidth); self.trailingAction:setHeight(self.height)
                 end
                 return self
         end
@@ -993,8 +1004,8 @@ function Controls.field(parent, options)
         end
         if options.trailingActionIcon then
                 field.trailingAction = Controls.iconButton(field, {
-                        x = field.width - iconInset + iconPadding,
-                        y = math.floor((field.height - iconSize) / 2), w = iconSize, h = iconSize,
+			x = field.width - declaredTrailingWidth,
+			y = 0, w = declaredTrailingWidth, h = field.height,
 			icon = options.trailingActionIcon, iconSize = iconSize, iconPadding = 0,
 			chrome = false, enabled = options.enabled, playerNum = options.playerNum,
 			theme = options.theme, iconTint = SiK.UI.Theme.color("textMuted", options.theme),
@@ -1208,6 +1219,7 @@ function Controls.search(parent, options)
 		leadingIcon = options.searchIcon or "sik.search.18",
 		trailingActionIcon = options.clearIcon or "sik.close.18",
 		iconSize = 18, iconPadding = math.max(8, n(options.iconPadding, 8)),
+		trailingActionWidth = "height",
 		trailingActionVisible = tostring(options.text or "") ~= "",
 		onTrailingAction = function() return clear(panel) end,
 		onChange = function() scheduleChange(panel) end,
@@ -1963,10 +1975,14 @@ function Controls.copyText(parent, options)
 	panel.text = tostring(options.text or "")
 	panel.font = font
 	panel.tone = options.tone or "textMuted"
+	panel.noWrap = options.noWrap == true
 	panel.align = options.align or "left"
 	panel.verticalAlign = options.verticalAlign or "top"
 	local function rewrap(self)
-		self.lines = Controls.wrapText(self.text, math.max(1, self.width), self.font)
+		local manager = type(getTextManager) == "function" and getTextManager() or nil
+		local fits = measuredWidth(manager, self.font, self.text) <= self.width
+		self.lines = self.noWrap and fits and { self.text }
+			or Controls.wrapText(self.text, math.max(1, self.width), self.font)
 		self:setHeight(math.max(fontHeight(self.font), #self.lines * lineHeight))
 	end
 	panel.prerender = function(self)

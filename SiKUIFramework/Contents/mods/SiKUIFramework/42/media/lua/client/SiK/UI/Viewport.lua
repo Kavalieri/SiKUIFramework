@@ -104,11 +104,11 @@ function Viewport.clamp(rect, playerNum, environment, margin)
 	return { x = x, y = y, w = width, h = height }
 end
 
--- A dragged window may extend past a horizontal edge, but retains a small
--- reachable header grip. Ordinary surfaces keep using clamp(), which remains
--- strict. The grip deliberately does not force the close control on screen:
--- players may park almost the whole window outside the viewport and recover it
--- by dragging the visible header strip.
+-- A dragged window may extend past any edge, but retains a small reachable
+-- strip. Ordinary surfaces keep using clamp(), which remains strict. The strip
+-- deliberately does not force the close control on screen: players may park
+-- almost the whole window outside the viewport and recover it by dragging the
+-- exposed edge.
 function Viewport.clampAccessible(rect, playerNum, environment, margin, access)
 	local safe = Viewport.safe(playerNum, environment, margin)
 	local width = math.min(math.max(0, tonumber(rect and (rect.w or rect.width)) or 0), safe.w)
@@ -116,13 +116,18 @@ function Viewport.clampAccessible(rect, playerNum, environment, margin, access)
 	local x = tonumber(rect and rect.x) or safe.x
 	local y = tonumber(rect and rect.y) or safe.y
 	access = type(access) == "table" and access or {}
-	local headerH = math.max(1, math.min(height, finite(access.headerHeight) or 1))
-	local headerW = math.max(1, math.min(width, finite(access.headerWidth) or 32))
-	local minX = safe.x - width + headerW
-	local maxX = safe.x + safe.w - headerW
+	local stripH = math.max(1, math.min(height,
+		finite(access.stripHeight) or finite(access.headerHeight) or 1))
+	local stripW = math.max(1, math.min(width,
+		finite(access.stripWidth) or finite(access.headerWidth) or 32))
+	local minX = safe.x - width + stripW
+	local maxX = safe.x + safe.w - stripW
 	if minX > maxX then minX, maxX = safe.x, safe.x + safe.w - width end
 	x = math.max(minX, math.min(x, maxX))
-	y = math.max(safe.y, math.min(y, safe.y + safe.h - headerH))
+	local minY = safe.y - height + stripH
+	local maxY = safe.y + safe.h - stripH
+	if minY > maxY then minY, maxY = safe.y, safe.y + safe.h - height end
+	y = math.max(minY, math.min(y, maxY))
 	return { x = x, y = y, w = width, h = height }
 end
 

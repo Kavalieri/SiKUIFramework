@@ -285,10 +285,9 @@ Theme.materialDefaults = Theme.materialDefaults or {
 		maxEffectiveAlpha = 0.84 },
 	surfaceAlt = { token = "surfaceAlt", alpha = 0.18, stableSurfaceBase = true,
 		maxEffectiveAlpha = 0.86 },
-	-- Popovers are detached from their owner in UIManager. They visually sit
-	-- over the window, not over the owner control's already-composed paint.
-	popover = { token = "surfaceAlt", alpha = 0.72, stableSurfaceBase = true,
-		detachedSurfaceBase = true, maxEffectiveAlpha = 0.92 },
+	-- UIManager renders a popover over the world, rather than compositing it
+	-- into its owner window. Its paint must therefore be its physical target.
+	popover = { token = "surfaceAlt", alpha = 0.92, detached = true },
 	-- Controls may sit on the translucent window shell.  Cap their composed
 	-- alpha so the source layer remains visible without turning that stack into
 	-- a second opaque panel.  Explicit role overrides still select the colour;
@@ -334,7 +333,7 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 	end
 	local surfaceBase = spec.stableSurfaceBase and inherited and inherited.surfaceBase
 	local actualBase = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
-	if spec.detachedSurfaceBase and surfaceBase then actualBase = surfaceBase end
+	if spec.detached then actualBase = { r = paint.r, g = paint.g, b = paint.b, a = 0 } end
 	if surfaceBase then
 		-- `surfaceBase` describes the desired alpha, while the immediate parent is
 		-- the real backdrop PZ has already painted. Derive only the delta needed
@@ -363,7 +362,8 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 		a = alpha,
 	}
 	return { role = role, paint = paint, effective = effective,
-		surfaceBase = spec.stableSurfaceBase and cloneColor(surfaceBase or actualBase)
+		surfaceBase = spec.detached and cloneColor(effective)
+			or spec.stableSurfaceBase and cloneColor(surfaceBase or actualBase)
 			or (inherited and cloneColor(inherited.surfaceBase)) or cloneColor(effective) }
 end
 

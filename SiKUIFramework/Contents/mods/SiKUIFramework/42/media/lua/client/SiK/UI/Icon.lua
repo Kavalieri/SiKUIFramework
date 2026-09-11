@@ -162,6 +162,7 @@ local builtins = {
 	["sik.close.18"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Close_18.png", width = 18, height = 18 },
 	["sik.search.18"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Search_18.png", width = 18, height = 18 },
 	["sik.arrow.right.14"] = { path = "media/ui/SiKUIFramework/SiK_Icon_ArrowRight_14.png", width = 14, height = 14 },
+	["sik.arrow.down.14"] = { path = "media/ui/SiKUIFramework/SiK_Icon_ArrowDown_14.png", width = 14, height = 14 },
 	["sik.alert.warning.24"] = { path = "media/ui/SiKUIFramework/SiK_Icon_AlertWarning_24.png", width = 24, height = 24 },
 	["sik.alert.danger.24"] = { path = "media/ui/SiKUIFramework/SiK_Icon_AlertDanger_24.png", width = 24, height = 24 },
 }
