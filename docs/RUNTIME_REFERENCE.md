@@ -19,7 +19,7 @@ matrix. No visual constructor is shared or server-side.
 The framework currently has two independent version axes:
 
 - `SiK.UI.Version.string()` and `mod.info` report the runtime/mod version
-  `1.0.2-dev1.6`.
+  `1.0.2`.
 - The catalog manifest reports `manifestVersion=0.1.0-preview`. Generated
   surface `frameworkRef.manifestVersion` pins this manifest contract, not the
   runtime/mod release number.
