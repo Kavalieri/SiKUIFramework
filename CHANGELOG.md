@@ -3,6 +3,21 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
+## 1.0.2 - 2026-09-11
+
+### Added
+
+- Inherited palette, margin and opacity configuration across windows and controls.
+- Per-player opacity support for consumers.
+
+### Improved and fixed
+
+- Unified fields, dropdowns, search, tooltips and footer under the SiK chrome.
+- Improved focus, Escape handling, layering, scrolling, resizing and CJK/IME input.
+- Stabilized block/table composition and refresh behavior.
+
+Known issue: partial window parking on all four screen edges remains pending.
+
 ## 1.0.1 - 2026-09-08
 
 ### Added
