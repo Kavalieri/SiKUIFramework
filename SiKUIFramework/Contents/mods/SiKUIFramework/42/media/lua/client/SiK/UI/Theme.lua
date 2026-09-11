@@ -170,7 +170,7 @@ function Theme.tokens(overrides)
 	return out
 end
 
-local function notifyBindings()
+local function notifyBindings(opacityPlayerKey)
 	local widgets = {}
 	for widget in pairs(Theme._bindings) do
 		local depth, parent = 0, widget.parent
@@ -188,7 +188,9 @@ local function notifyBindings()
 		local binding = widget and widget._sikThemeBinding or nil
 		if binding and binding.apply then
 			local nextTokens = Theme.tokens(binding.context)
-			if not colorsEqual(binding.tokens, nextTokens) then
+			local contextKey = binding.context and playerKey(binding.context.playerNum) or nil
+			if (opacityPlayerKey ~= nil and opacityPlayerKey == contextKey)
+				or not colorsEqual(binding.tokens, nextTokens) then
 				binding.tokens = nextTokens
 				pcall(binding.apply, widget, binding.context)
 			end
@@ -212,6 +214,37 @@ function Theme.set(overrides, playerNum)
 	else active = replacement; Theme._active = active end
 	Theme._revision = Theme._revision + 1
 	notifyBindings()
+	return true
+end
+
+--- Returns the effective UI opacity percentage for this player's UI.
+--- Player-local values fall back to the world sandbox default.
+function Theme.getOpacity(playerNum)
+	local key, reason = playerKey(playerNum)
+	if not key then return nil, reason or "invalid_player" end
+	return Sandbox.uiOpacityPercent(tonumber(key))
+end
+
+--- Replaces one player's in-memory UI opacity override (45..100 percent).
+--- The value is local only: it neither writes SandboxVars nor synchronizes.
+function Theme.setOpacity(percent, playerNum)
+	local key, reason = playerKey(playerNum)
+	if not key then return nil, reason or "invalid_player" end
+	local changed, opacityReason = Sandbox.setLocalUIOpacity(tonumber(key), percent)
+	if changed == nil then return nil, opacityReason end
+	if not changed then return false end
+	Theme._revision = Theme._revision + 1
+	notifyBindings(key)
+	return true
+end
+
+--- Clears one player's local opacity, restoring the world sandbox default.
+function Theme.clearOpacity(playerNum)
+	local key, reason = playerKey(playerNum)
+	if not key then return nil, reason or "invalid_player" end
+	if not Sandbox.clearLocalUIOpacity(tonumber(key)) then return false end
+	Theme._revision = Theme._revision + 1
+	notifyBindings(key)
 	return true
 end
 
@@ -308,6 +341,8 @@ end
 
 local function materialContext(parent, themeContext)
 	if isContext(themeContext) then return themeContext end
+	local inherited = materialParent(parent)
+	if inherited and isContext(inherited.themeContext) then return inherited.themeContext end
 	return parentContext(parent)
 end
 
@@ -318,15 +353,17 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 	role = role or "inherit"
 	local inherited = materialParent(parent)
 	local parentColor = inherited and inherited.effective or nil
+	local context = materialContext(parent, themeContext)
+	local playerNum = context and context.playerNum or inherited and inherited.playerNum
 	if role == "inherit" or role == "transparent" then
 		return { role = role, paint = nil, effective = cloneColor(parentColor)
-			or { r = 0, g = 0, b = 0, a = 0 } }
+			or { r = 0, g = 0, b = 0, a = 0 }, themeContext = context, playerNum = playerNum }
 	end
 	local spec = Theme.materialDefaults[role]
 	if not spec then return nil, "invalid_material_role" end
 	local override = type(overrides) == "table" and overrides[role] or nil
 	if override ~= nil and type(override) ~= "table" then return nil, "invalid_material_override" end
-	local tokens = Theme.tokens(materialContext(parent, themeContext))
+	local tokens = Theme.tokens(context)
 	local paint = cloneColor(tokens[spec.token] or Theme.defaults[spec.token])
 	paint.a = spec.alpha
 	if override then
@@ -338,9 +375,9 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 	-- The sandbox setting maps each source material around the approved 80%
 	-- baseline before its normal source-over calculation. Text, icons and the
 	-- opaque Table path do not resolve this role and remain unaffected.
-	paint.a = Sandbox.materialAlpha(paint.a)
+	paint.a = Sandbox.materialAlpha(paint.a, playerNum)
 	local maxEffectiveAlpha = spec.maxEffectiveAlpha
-		and Sandbox.materialAlpha(spec.maxEffectiveAlpha) or nil
+		and Sandbox.materialAlpha(spec.maxEffectiveAlpha, playerNum) or nil
 	local surfaceBase = spec.stableSurfaceBase and inherited and inherited.surfaceBase
 	local actualBase = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
 	if spec.detached then actualBase = { r = paint.r, g = paint.g, b = paint.b, a = 0 } end
@@ -371,7 +408,7 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 		b = paint.b * sourceWeight + actualBase.b * baseWeight,
 		a = alpha,
 	}
-	return { role = role, paint = paint, effective = effective,
+	return { role = role, paint = paint, effective = effective, themeContext = context, playerNum = playerNum,
 		surfaceBase = spec.detached and cloneColor(effective)
 			or spec.stableSurfaceBase and cloneColor(surfaceBase or actualBase)
 			or (inherited and cloneColor(inherited.surfaceBase)) or cloneColor(effective) }

@@ -25,7 +25,7 @@ framework does not resolve item types, learning, network or product semantics.
 `role`, `paint`, `effective` and the inherited `surfaceBase`. `paint` is the
 source RGBA drawn once by the current widget; `effective` is the composited
 RGBA available to children and diagnostics. Roles are `window` (.80),
-`header`/`footer` (.20), `surface` (.13), `surfaceAlt` (.18), `popover` (.72),
+`header`/`footer` (.20), `surface` (.13), `surfaceAlt` (.18), `popover` (.92),
 `control` (.88), `inherit` and `transparent`.
 The latter two have `paint=nil` and add no base. `parent` accepts a descriptor
 or panel `_sikMaterial`; explicit overrides use a role key, for example
@@ -57,9 +57,21 @@ descriptor. `parent` may be a parent context or a panel with
 defaults, global layer, player layer, parent partial overrides and local partial
 overrides, in that order. Zero channels are valid overrides.
 
+`Theme.getOpacity(playerNum)`, `Theme.setOpacity(percent, playerNum)` and
+`Theme.clearOpacity(playerNum)` control an in-memory opacity override for a
+single player (integer 0 through 3). `percent` is an integer from 45 through
+100; invalid values return `nil, "invalid_opacity"`. A player with no local
+override reads the world's `SiKUIFramework.UIOpacity` sandbox value. Setting or
+clearing a changed override reapplies the existing Theme bindings for that
+player in parent-first order; it does not write sandbox state, synchronize over
+the network, rebuild surfaces or poll. Material descriptors carry their theme
+context/player so child layers and detached popovers use the same effective
+opacity.
+
 `Theme.bind(widget, context, apply)` stores the binding only on `widget` and
 keeps a weak widget registry. It invokes `apply(widget, context)` initially and
-only after a `Theme.set` changes that widget's resolved snapshot. The callback
+after a `Theme.set` changes that widget's resolved snapshot or a changed local
+opacity affects that player's materials. The callback
 reads its snapshot with `Theme.tokens(context)`. Passing `nil` as `context`
 removes the binding. No polling, surface reconstruction or owner-to-widget
 strong registry is introduced. `resolveMaterial` accepts an optional fourth
