@@ -161,6 +161,8 @@ local builtins = {
 	["sik.check.18"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Check_18.png", width = 18, height = 18 },
 	["sik.close.18"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Close_18.png", width = 18, height = 18 },
 	["sik.search.18"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Search_18.png", width = 18, height = 18 },
+	["sik.close.24"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Close_24.png", width = 24, height = 24 },
+	["sik.search.24"] = { path = "media/ui/SiKUIFramework/SiK_Icon_Search_24.png", width = 24, height = 24 },
 	["sik.arrow.right.14"] = { path = "media/ui/SiKUIFramework/SiK_Icon_ArrowRight_14.png", width = 14, height = 14 },
 	["sik.arrow.down.14"] = { path = "media/ui/SiKUIFramework/SiK_Icon_ArrowDown_14.png", width = 14, height = 14 },
 	["sik.alert.warning.24"] = { path = "media/ui/SiKUIFramework/SiK_Icon_AlertWarning_24.png", width = 24, height = 24 },
