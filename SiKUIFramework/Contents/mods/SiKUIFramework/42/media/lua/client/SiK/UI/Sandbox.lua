@@ -1,3 +1,6 @@
+-- UI sandbox values are consumed only by client renderers. Keeping this module
+-- in the client load partition guarantees Namespace is available during B42
+-- ResetLua; a shared module cannot require a client-only dependency.
 require "SiK/UI/Namespace"
 
 local Sandbox = SiK.UI.Sandbox or {}

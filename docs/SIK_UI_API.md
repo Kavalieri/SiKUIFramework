@@ -66,7 +66,9 @@ clearing a changed override reapplies the existing Theme bindings for that
 player in parent-first order; it does not write sandbox state, synchronize over
 the network, rebuild surfaces or poll. Material descriptors carry their theme
 context/player so child layers and detached popovers use the same effective
-opacity.
+opacity. The `Sandbox` helper belongs to the client partition because it feeds
+UI materials and depends on the client `Namespace`; sandbox option definitions
+and translations remain shared metadata.
 
 `Theme.bind(widget, context, apply)` stores the binding only on `widget` and
 keeps a weak widget registry. It invokes `apply(widget, context)` initially and
