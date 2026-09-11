@@ -1,4 +1,5 @@
 require "SiK/UI/Namespace"
+local Sandbox = require "SiK/UI/Sandbox"
 
 local Theme = SiK.UI.Theme or {}
 SiK.UI.Namespace.define("Theme", Theme)
@@ -296,9 +297,12 @@ Theme.materialDefaults = Theme.materialDefaults or {
 }
 
 local function materialParent(parent)
-	if type(parent) ~= "table" then return nil end
-	if type(parent._sikMaterial) == "table" then return parent._sikMaterial end
-	if type(parent.effective) == "table" then return parent end
+	local cursor = parent
+	while type(cursor) == "table" do
+		if type(cursor._sikMaterial) == "table" then return cursor._sikMaterial end
+		if type(cursor.effective) == "table" then return cursor end
+		cursor = cursor.parent
+	end
 	return nil
 end
 
@@ -331,6 +335,12 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 		paint.b = channel(override.b or override[3], paint.b)
 		paint.a = channel(override.a or override[4], paint.a)
 	end
+	-- The sandbox setting maps each source material around the approved 80%
+	-- baseline before its normal source-over calculation. Text, icons and the
+	-- opaque Table path do not resolve this role and remain unaffected.
+	paint.a = Sandbox.materialAlpha(paint.a)
+	local maxEffectiveAlpha = spec.maxEffectiveAlpha
+		and Sandbox.materialAlpha(spec.maxEffectiveAlpha) or nil
 	local surfaceBase = spec.stableSurfaceBase and inherited and inherited.surfaceBase
 	local actualBase = parentColor or { r = paint.r, g = paint.g, b = paint.b, a = 0 }
 	if spec.detached then actualBase = { r = paint.r, g = paint.g, b = paint.b, a = 0 } end
@@ -340,16 +350,16 @@ function Theme.resolveMaterial(role, parent, overrides, themeContext)
 		-- to reach the target; using surfaceBase itself as the compositor would
 		-- make nested Blocks darken despite their bookkeeping descriptor.
 		local targetAlpha = paint.a + surfaceBase.a * (1 - paint.a)
-		if spec.maxEffectiveAlpha then targetAlpha = math.min(targetAlpha, spec.maxEffectiveAlpha) end
+		if maxEffectiveAlpha then targetAlpha = math.min(targetAlpha, maxEffectiveAlpha) end
 		if targetAlpha > actualBase.a then
 			paint.a = (targetAlpha - actualBase.a) / math.max(0.0001, 1 - actualBase.a)
 		else
 			paint.a = 0
 		end
-	elseif spec.maxEffectiveAlpha and actualBase.a < spec.maxEffectiveAlpha then
-		local allowed = (spec.maxEffectiveAlpha - actualBase.a) / math.max(0.0001, 1 - actualBase.a)
+	elseif maxEffectiveAlpha and actualBase.a < maxEffectiveAlpha then
+		local allowed = (maxEffectiveAlpha - actualBase.a) / math.max(0.0001, 1 - actualBase.a)
 		paint.a = math.min(paint.a, math.max(0, allowed))
-	elseif spec.maxEffectiveAlpha and actualBase.a >= spec.maxEffectiveAlpha then
+	elseif maxEffectiveAlpha and actualBase.a >= maxEffectiveAlpha then
 		paint.a = 0
 	end
 	local alpha = paint.a + actualBase.a * (1 - paint.a)

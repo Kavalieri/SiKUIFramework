@@ -1,5 +1,15 @@
 VERSION = 1,
 
+option SiKUIFramework.UIOpacity
+{
+	type = integer,
+	default = 80,
+	min = 45,
+	max = 100,
+	page = SiKUIFramework,
+	translation = SiKUIFramework_UIOpacity,
+}
+
 option SiKUIFramework.DebugMode
 {
 	type = boolean,

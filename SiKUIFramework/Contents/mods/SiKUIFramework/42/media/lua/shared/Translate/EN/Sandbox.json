@@ -1,4 +1,7 @@
 {
+	"Sandbox_SiKUIFramework": "SiK UI Framework",
+	"Sandbox_SiKUIFramework_UIOpacity": "UI opacity",
+	"Sandbox_SiKUIFramework_UIOpacity_tooltip": "Controls SiK UI surface opacity from 45% translucent to 100% opaque. Text, icons and tables are unchanged.",
 	"Sandbox_SiKUIFramework_Debug": "SiK UI Framework: diagnostics",
 	"Sandbox_SiKUIFramework_DebugMode": "Composition and lifecycle diagnostics",
 	"Sandbox_SiKUIFramework_DebugMode_tooltip": "Writes bounded framework events for mounting, visibility, geometry, component trees, overlaps and interaction. It does not include internal data from any consumer mod."

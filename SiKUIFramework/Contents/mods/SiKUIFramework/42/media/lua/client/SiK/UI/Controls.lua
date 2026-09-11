@@ -768,6 +768,11 @@ function Controls.icon(parent, options)
 	local panel = decorate(ISPanel:new(options.x or 0, options.y or 0,
 		options.w or options.width or 32, options.h or options.height or 32), "icon", options)
 	panel:initialise(); if panel.instantiate then panel:instantiate() end
+	-- Decorative icon panels must never retain ISPanel's own paint. Their parent
+	-- owns all chrome; only the registered texture is rendered here.
+	panel.drawBackground = false
+	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.iconSource = options.icon or options.texture
 	panel.texture = SiK.UI.Icon.resolve(panel.iconSource)
 	local sourceMeta = SiK.UI.Icon.metadata(panel.iconSource)
@@ -784,9 +789,7 @@ function Controls.icon(parent, options)
         end
         panel.onMouseDown = function() return false end
         panel.onMouseUp = function() return false end
-	local previousRender = panel.render
 	panel.render = function(self)
-		if type(previousRender) == "function" then previousRender(self) end
 		local color = self.tone and SiK.UI.Theme.color(self.tone, options.theme)
 			or { r = 1, g = 1, b = 1, a = 1 }
 		local size = math.min(self.iconSize, self.width, self.height)
@@ -798,6 +801,12 @@ function Controls.icon(parent, options)
 			SiK.UI.Icon.draw(self, self.texture, x, y, size, size,
 				{ r = color.r, g = color.g, b = color.b, alpha = color.a })
 		end
+	end
+	panel.prerender = function(self)
+		-- Do not delegate to ISPanel here: on B42 it may paint its own background
+		-- even when this decorative child has no framework chrome.
+		self.drawBackground = false
+		self.backgroundColor.a, self.borderColor.a = 0, 0
 	end
 	function panel:getTexture() return self.texture end
 	function panel:setTexture(value)

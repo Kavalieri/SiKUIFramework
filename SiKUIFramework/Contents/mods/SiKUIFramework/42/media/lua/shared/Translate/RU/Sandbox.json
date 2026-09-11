@@ -1,0 +1,8 @@
+{
+  "Sandbox_SiKUIFramework": "SiK UI Framework",
+  "Sandbox_SiKUIFramework_UIOpacity": "Непрозрачность интерфейса",
+  "Sandbox_SiKUIFramework_UIOpacity_tooltip": "Управляет непрозрачностью поверхностей SiK UI: от 45% полупрозрачности до 100% непрозрачности. Текст, значки и таблицы не меняются.",
+  "Sandbox_SiKUIFramework_Debug": "SiK UI Framework: диагностика",
+  "Sandbox_SiKUIFramework_DebugMode": "Диагностика композиции и жизненного цикла",
+  "Sandbox_SiKUIFramework_DebugMode_tooltip": "Записывает ограниченные события фреймворка для монтирования, видимости, геометрии, деревьев компонентов, перекрытий и взаимодействия. Без внутренних данных модов-потребителей."
+}

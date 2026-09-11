@@ -1,0 +1,8 @@
+{
+  "Sandbox_SiKUIFramework": "SiK UI 框架",
+  "Sandbox_SiKUIFramework_UIOpacity": "界面不透明度",
+  "Sandbox_SiKUIFramework_UIOpacity_tooltip": "调整 SiK UI 表面不透明度：45% 半透明至 100% 不透明。文字、图标和表格不变。",
+  "Sandbox_SiKUIFramework_Debug": "SiK UI Framework：诊断",
+  "Sandbox_SiKUIFramework_DebugMode": "组合和生命周期诊断",
+  "Sandbox_SiKUIFramework_DebugMode_tooltip": "记录受限的框架事件，用于挂载、可见性、几何、组件树、重叠和交互。不包含任何消费模组的内部数据。"
+}

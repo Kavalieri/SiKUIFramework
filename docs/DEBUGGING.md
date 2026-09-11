@@ -6,6 +6,12 @@ diagnostics`, with `Composition and lifecycle diagnostics`; when enabled its
 owned sink writes `[SiK.UI][<kind>] ...` lines through `DebugLog`. It never
 depends on a consumer's logger, namespace or Sandbox options.
 
+The separate `SiK UI Framework` Sandbox page exposes `UI opacity` (45–100,
+default 80). The default preserves the approved material palette, 100 makes
+surfaces physically opaque and lower values increase world visibility. It
+changes only framework material surfaces when they are built; it adds no tick,
+diagnostic event, text/icon alpha or table change.
+
 Para una prueba visual SP en español, abre **Opciones de sandbox > SiK UI
 Framework: diagnóstico** y activa únicamente **Diagnóstico de composición y
 ciclo de vida** (`Composition and lifecycle diagnostics` en inglés). El prefijo

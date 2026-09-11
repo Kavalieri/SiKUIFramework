@@ -1,0 +1,8 @@
+{
+  "Sandbox_SiKUIFramework": "SiK UI Framework",
+  "Sandbox_SiKUIFramework_UIOpacity": "UI-Deckkraft",
+  "Sandbox_SiKUIFramework_UIOpacity_tooltip": "Steuert die Deckkraft der SiK-UI-Flächen von 45 % transparent bis 100 % deckend. Text, Symbole und Tabellen bleiben unverändert.",
+  "Sandbox_SiKUIFramework_Debug": "SiK UI Framework: Diagnose",
+  "Sandbox_SiKUIFramework_DebugMode": "Kompositions- und Lebenszyklusdiagnose",
+  "Sandbox_SiKUIFramework_DebugMode_tooltip": "Schreibt begrenzte Framework-Ereignisse für Einbindung, Sichtbarkeit, Geometrie, Komponentenbäume, Überlappungen und Interaktion. Keine internen Daten eines Verbrauchermods."
+}
