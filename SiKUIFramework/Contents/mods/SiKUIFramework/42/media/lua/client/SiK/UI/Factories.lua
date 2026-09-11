@@ -511,7 +511,7 @@ local function controlPresentation(props)
 		met = props.met, iconSize = props.iconSize or props["icon-size"],
 		placeholder = props.placeholder or (isInput and props.label or nil), searchable = props.searchable,
 		searchPlaceholder = props.searchPlaceholder,
-		maxLength = props.maxLength, wrap = props.wrap, framed = props.framed,
+		numeric = props.numeric, maxLength = props.maxLength, wrap = props.wrap, framed = props.framed,
 	}
 	if type(data) == "table" then
 		if data.text ~= nil then result.text = data.text end
@@ -539,6 +539,7 @@ local function controlPresentation(props)
 		if data.placeholder ~= nil then result.placeholder = data.placeholder end
 		if data.searchable ~= nil then result.searchable = data.searchable end
 		if data.searchPlaceholder ~= nil then result.searchPlaceholder = data.searchPlaceholder end
+		if data.numeric ~= nil then result.numeric = data.numeric end
 		if data.maxLength ~= nil then result.maxLength = data.maxLength end
 		if data.wrap ~= nil then result.wrap = data.wrap end
 		if data.framed ~= nil then result.framed = data.framed end
@@ -577,7 +578,8 @@ local function controlFactory(parent, props, context)
                 items = presentation.items, selected = presentation.selected,
 		placeholder = placeholder, searchable = presentation.searchable,
 		searchPlaceholder = presentation.searchPlaceholder,
-		maxLength = presentation.maxLength, wrap = presentation.wrap, framed = presentation.framed,
+		numeric = presentation.numeric, maxLength = presentation.maxLength,
+		wrap = presentation.wrap, framed = presentation.framed,
 		tone = presentation.tone, color = presentation.color, indicator = presentation.indicator,
 		value = presentation.value, label = presentation.label, status = presentation.status,
 		mode = presentation.mode, severity = presentation.severity, glow = presentation.glow,

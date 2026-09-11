@@ -528,7 +528,7 @@ Existing status constructors without `wrap` retain their behavior.
 `UI.Controls.measureStatus(text, width, { framed?, indicator?, font? })` returns
 `{ lines, height }` without creating a widget. Wrapped status controls and the
 Builder use this same measurement. Declarative control data can supply `text`,
-`wrap`, `framed` and `maxLength` (for fields). An explicit layout height remains
+`wrap`, `framed`, `numeric` and `maxLength` (for fields). An explicit layout height remains
 an override; omit it when the status should grow with translated content.
 
 Constructors return `instance` on success, or `nil, reason` for invalid inputs
