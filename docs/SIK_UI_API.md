@@ -228,7 +228,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.3-dev1`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.3`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 

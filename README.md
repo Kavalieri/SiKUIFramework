@@ -23,7 +23,7 @@ and [tabs contract](docs/TABS.md).
 
 | Version | Mod ID | Workshop ID | Build | Support |
 | --- | --- | --- | --- | --- |
-| 1.0.3-dev1 | SiKUIFramework | 3794332103 | 42.20+ | DEVELOPMENT |
+| 1.0.3 | SiKUIFramework | 3794332103 | 42.20+ | STABLE |
 
 The framework is a required client dependency for current SiK products.
 Compatibility with a consumer is only confirmed when that consumer names and
