@@ -228,7 +228,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.2`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.3-dev1`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
@@ -639,3 +639,13 @@ viewport remain included: this is the navigable data order, not the recycled
 widget pool. Mutating the array does not mutate the table; treat its data
 references as read-only. A disposed table returns an empty array. Intended for
 on-demand range selection, without observing private projection state.
+
+## Keyed row patches
+
+`table:patchRows({upserts={}, removeKeys={}, order={}})` validates dense arrays
+and applies complete root replacements without rebuilding unaffected semantics.
+On success it returns `true, nil, undo`. The neutral `undo()` restores the prior
+rows, selection, focus, expansion, pagination and scroll while that published
+image remains current. It returns `false, "image_superseded"` after a newer row
+publication. This lets a consumer keep the undo only for the duration of its own
+transaction and prevents an older failure from overwriting newer UI state.

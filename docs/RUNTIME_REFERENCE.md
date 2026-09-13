@@ -218,11 +218,30 @@ local table = assert(SiK.UI.Table.create({
 }))
 ```
 
-Use `setRows(rows, preserveOffset)`, `setColumns(columns)`, `setPage`,
+Use `setRows(rows, preserveOffset)`, `patchRows(spec)`, `setColumns(columns)`, `setPage`,
 `setChildPage`, `toggleExpanded`, `setSort`, `setSelectedKey(s)`,
 `captureState`, `restoreState` and `dispose`. Table callbacks include
 `onSelect`, `onRowClick`, `onSort`, `onColumnResize` and `onExpansionChange`.
 They receive stable keys and local row/selection context, not product authority.
+
+`patchRows({ upserts = rows, removeKeys = keys, order = keys })` applies a keyed
+delta and returns `true, nil, undo, isCurrent`, or `nil, cause` on rejection. `undo()` restores
+the preceding image only while it remains current and returns `false,
+"image_superseded"` after a newer `setRows` or `patchRows`. `isCurrent()` checks
+that image without changing it. Undo handles are single use; reversing the newest
+patch restores the preceding image token, allowing a chain to unwind in reverse
+order. Consumers retain handles only for their synchronous transaction and discard
+them on success so that old snapshots can be collected. Supply dense arrays;
+`order` is optional and, when supplied, names every final root exactly once.
+Without it, existing roots keep their order and new roots append in upsert order.
+Keys must be stable strings or numbers; duplicate, missing removal, conflicting
+upsert/removal and ambiguous string/number identities are rejected before commit.
+Each upsert replaces the complete root, including its current child data.
+Unchanged roots reuse their semantic entries and projected rows. Selection,
+focus, expansion, child pagination and scroll are retained for surviving keys;
+the viewport publisher reuses the row pool. Rejected publication restores the
+previous data and state, preserving the original cause. Ordering still scans
+root references; this API does not promise constant work independent of row count.
 
 #### Row adapter
 
@@ -274,7 +293,7 @@ currently loaded child page; `stateOf` supplies logical `totalRows`, semantic
 totals. Legacy `total` is accepted only as an alias of `totalRows`; it must
 never carry a physical-unit count. `setChildPage(parentKey, page)` calls `onPageChange` and
 does not mutate or replace source rows. After the request completes, the
-consumer updates its child data and calls `setRows` or updates the owning
+consumer updates its child data and calls `patchRows` for that root, `setRows`, or updates the owning
 surface. `expansion.hasChildren` can keep the expand affordance available
 before the first page is loaded.
 

@@ -794,7 +794,8 @@ function TableInstance:_rebuildSemanticIndex()
 	if not active or not active.children then self.activePageParentKey = nil end
 end
 
-function TableInstance:_projectParent(parent, out)
+function TableInstance:_projectParent(parent, out, semanticIndex)
+	semanticIndex = semanticIndex or self.semanticById
 	out[#out + 1] = { data = parent.item, depth = 0, key = parent.key,
 		visualKey = parent.id, semantic = parent, sourceIndex = parent.index,
 			hasChildren = parent.hasChildren == true }
@@ -806,7 +807,7 @@ function TableInstance:_projectParent(parent, out)
 			local child = children[childIndex]
 			local childKey = self.expansion.keyOf and self.expansion.keyOf(child, childIndex, parent.item)
 				or (tostring(parent.key) .. ":" .. tostring(childIndex))
-			local selection = self.semanticById[semanticId("child", childKey, parent.key)]
+			local selection = semanticIndex[semanticId("child", childKey, parent.key)]
 			out[#out + 1] = { data = child, depth = 1, key = childKey,
 				visualKey = selection.id, semantic = selection, parentKey = parent.key,
 				sourceIndex = childIndex, hasChildren = false }
@@ -854,7 +855,7 @@ function TableInstance:_projectParent(parent, out)
 		local child = children[childIndex]
 		local childKey = self.expansion.keyOf and self.expansion.keyOf(child, childIndex, parent.item)
 			or (tostring(parent.key) .. ":" .. tostring(childIndex))
-		local selection = self.semanticById[semanticId("child", childKey, parent.key)]
+		local selection = semanticIndex[semanticId("child", childKey, parent.key)]
 		out[#out + 1] = { data = child, depth = 1, key = childKey,
 			visualKey = selection.id, semantic = selection, parentKey = parent.key,
 			sourceIndex = childIndex, hasChildren = false }
@@ -880,11 +881,16 @@ end
 
 function TableInstance:_projectRows()
 	local visible = {}
+	self.projectedByParentKey = {}
 	if self.expansion then
 		self.childPageStates = {}
 		for index = 1, #self.rows do
 			local key = self.keyOf(self.rows[index], index)
+			local first = #visible + 1
 			self:_projectParent(self.parentByKey[key], visible)
+			local block = {}
+			for projectedIndex = first, #visible do block[#block + 1] = visible[projectedIndex] end
+			self.projectedByParentKey[key] = block
 		end
 		-- Pagination belongs exclusively to the hierarchy the player opened.
 		-- Falling back to the first expandable root paints a misleading global
@@ -898,8 +904,10 @@ function TableInstance:_projectRows()
 	for index = 1, #self.rows do
 		local key = self.keyOf(self.rows[index], index)
 		local selection = self.parentByKey[key]
-		visible[#visible + 1] = { data = selection.item, depth = 0, key = key,
+		local projected = { data = selection.item, depth = 0, key = key,
 			visualKey = selection.id, semantic = selection, sourceIndex = index, hasChildren = false }
+		visible[#visible + 1] = projected
+		self.projectedByParentKey[key] = { projected }
 	end
 	if not self.pagination then
 		self.pageState = pageState(#visible, 1, math.max(1, #visible))
@@ -1080,9 +1088,8 @@ function TableInstance:_applyAutoHeight()
 	return self
 end
 
-function TableInstance:_refreshRows(preserveOffset)
+function TableInstance:_publishProjected(projected, preserveOffset)
 	local previousOffset = preserveOffset == true and self.scroll:getScrollOffset() or 0
-	local projected = self:_projectRows()
 	self.projectedRows = projected
 	if self.pager then self.pager:setVisible(reservedPagerHeight(self) > 0) end
 	local chromeHeight = self.blockHeaderHeight + self.blockHeaderGap
@@ -1099,13 +1106,323 @@ function TableInstance:_refreshRows(preserveOffset)
 	return result, reason
 end
 
+function TableInstance:_refreshRows(preserveOffset)
+	return self:_publishProjected(self:_projectRows(), preserveOffset)
+end
+
 function TableInstance:setRows(rows, preserveOffset)
 	if self.disposed then return nil, "disposed" end
 	self.rows = type(rows) == "table" and rows or {}
 	self:_rebuildSemanticIndex()
 	-- A data refresh is not a navigation request.  Keep the user's semantic
 	-- position unless the caller explicitly starts a new result set.
-	return self:_refreshRows(preserveOffset ~= false)
+	local accepted, reason = self:_refreshRows(preserveOffset ~= false)
+	if accepted ~= false and accepted ~= nil then
+		self._rowImageToken = {}
+	end
+	return accepted, reason
+end
+
+local function patchKey(instance, row, index)
+	local ok, key = pcall(instance.keyOf, row, index)
+	if not ok then return nil, key end
+	if (type(key) ~= "string" and type(key) ~= "number") or tostring(key) == "" then
+		return nil, "invalid_key"
+	end
+	if type(key) == "number" and key ~= key then return nil, "invalid_key" end
+	return key
+end
+
+local function copyMap(source)
+	local result = {}
+	for key, value in pairs(source or {}) do result[key] = value end
+	return result
+end
+
+local function validateDenseArray(value, label)
+	if type(value) ~= "table" then return nil, "invalid_" .. label end
+	local length, count = #value, 0
+	for key in pairs(value) do
+		if type(key) ~= "number" or key ~= key or key ~= math.floor(key)
+			or key < 1 or key > length then
+			return nil, "invalid_" .. label .. "_index"
+		end
+		count = count + 1
+	end
+	if count ~= length then return nil, "sparse_" .. label end
+	return true
+end
+
+local function restorePatchImage(self, old, indexChanges)
+	self.rows, self.semanticById, self.parentByKey = old.rows, old.semanticById, old.parentByKey
+	self.projectedRows, self.projectedByParentKey = old.projectedRows, old.projectedByParentKey
+	self.firstPageParentKey, self.childPageStates = old.firstPageParentKey, old.childPageStates
+	self.childPages, self.expanded, self.activePageParentKey, self.pageState, self.page = old.childPages,
+		old.expanded, old.activePageParentKey, old.pageState, old.page
+	self.semanticSelection, self.semanticSelections = old.semanticSelection, old.semanticSelections
+	for index = 1, #(indexChanges or {}) do
+		local change = indexChanges[index]
+		if change.parent then change.parent.index = change.index
+		else change.projected.sourceIndex = change.index end
+	end
+	self.list.data = old.listData
+	local ok, accepted, reason = pcall(self._publishProjected, self, old.projectedRows, true)
+	self.list.data = old.listData
+	self.scroll:setScrollOffset(old.offset)
+	if not ok then return nil, accepted end
+	if accepted == false or accepted == nil then return nil, reason or "undo_rejected" end
+	return true
+end
+
+local function prepareRowPatch(self, spec)
+	if self.disposed then return nil, "disposed" end
+	if type(spec) ~= "table" then return nil, "invalid_patch" end
+	local upserts = spec.upserts or {}
+	local removeKeys = spec.removeKeys or {}
+	local order = spec.order
+	if type(upserts) ~= "table" or type(removeKeys) ~= "table"
+		or (order ~= nil and type(order) ~= "table") then return nil, "invalid_patch" end
+	local dense, denseReason = validateDenseArray(upserts, "upserts")
+	if not dense then return nil, denseReason end
+	dense, denseReason = validateDenseArray(removeKeys, "remove_keys")
+	if not dense then return nil, denseReason end
+	if order ~= nil then
+		dense, denseReason = validateDenseArray(order, "order")
+		if not dense then return nil, denseReason end
+	end
+
+	local currentByKey, currentToken, seen, semanticSeen = {}, {}, {}, {}
+	for index = 1, #self.rows do
+		local key, reason = patchKey(self, self.rows[index], index)
+		if key == nil then return nil, reason end
+		local token = type(key) .. ":" .. tostring(key)
+		local semanticToken = tostring(key)
+		if seen[token] or semanticSeen[semanticToken] then return nil, "duplicate_current_key:" .. tostring(key) end
+		seen[token], currentByKey[key], currentToken[token] = true, self.rows[index], key
+		semanticSeen[semanticToken] = true
+	end
+	local removed, changed, replacements = {}, {}, {}
+	for index = 1, #removeKeys do
+		local key = removeKeys[index]
+		if (type(key) ~= "string" and type(key) ~= "number") or tostring(key) == "" then
+			return nil, "invalid_remove_key"
+		end
+		if type(key) == "number" and key ~= key then return nil, "invalid_remove_key" end
+		local token = type(key) .. ":" .. tostring(key)
+		if removed[token] then return nil, "duplicate_remove_key:" .. tostring(key) end
+		if not currentToken[token] then return nil, "unknown_remove_key:" .. tostring(key) end
+		removed[token], changed[token] = true, true
+	end
+	for index = 1, #upserts do
+		local row = upserts[index]
+		if type(row) ~= "table" then return nil, "invalid_upsert" end
+		local key, reason = patchKey(self, row, index)
+		if key == nil then return nil, reason end
+		local token = type(key) .. ":" .. tostring(key)
+		if replacements[token] or removed[token] then return nil, "duplicate_patch_key:" .. tostring(key) end
+		replacements[token], changed[token] = { key = key, row = row }, true
+	end
+
+	local finalByToken = {}
+	for token, key in pairs(currentToken) do
+		if not removed[token] then finalByToken[token] = { key = key, row = replacements[token] and replacements[token].row or currentByKey[key] } end
+	end
+	for token, entry in pairs(replacements) do finalByToken[token] = entry end
+	local finalSemanticKeys = {}
+	for _, entry in pairs(finalByToken) do
+		local semanticToken = tostring(entry.key)
+		if finalSemanticKeys[semanticToken] then return nil, "duplicate_semantic_key:" .. semanticToken end
+		finalSemanticKeys[semanticToken] = true
+	end
+	local nextRows, finalTokens = {}, {}
+	if order ~= nil then
+		for index = 1, #order do
+			local key = order[index]
+			if type(key) ~= "string" and type(key) ~= "number" then return nil, "invalid_order_key" end
+			if type(key) == "number" and key ~= key then return nil, "invalid_order_key" end
+			local token = type(key) .. ":" .. tostring(key)
+			if finalTokens[token] then return nil, "duplicate_order_key:" .. tostring(key) end
+			local entry = finalByToken[token]
+			if not entry then return nil, "unknown_order_key:" .. tostring(key) end
+			finalTokens[token], nextRows[#nextRows + 1] = true, entry.row
+		end
+		for token in pairs(finalByToken) do
+			if not finalTokens[token] then return nil, "incomplete_order" end
+		end
+	else
+		for index = 1, #self.rows do
+			local key = patchKey(self, self.rows[index], index)
+			local token = type(key) .. ":" .. tostring(key)
+			if not removed[token] then
+				local entry = replacements[token]
+				nextRows[#nextRows + 1] = entry and entry.row or self.rows[index]
+				finalTokens[token] = true
+			end
+		end
+		for index = 1, #upserts do
+			local key = patchKey(self, upserts[index], index)
+			local token = type(key) .. ":" .. tostring(key)
+			if not currentToken[token] then nextRows[#nextRows + 1], finalTokens[token] = upserts[index], true end
+		end
+	end
+	return { nextRows=nextRows, finalByToken=finalByToken, currentToken=currentToken,
+		changed=changed, removed=removed }
+end
+
+
+--- Applies a validated keyed delta without rebuilding semantics or projection
+--- for unchanged roots. `order`, when present, is the complete final key order.
+function TableInstance:patchRows(spec)
+	if self.disposed then return nil, "disposed" end
+	local plan, planReason = prepareRowPatch(self, spec)
+	if not plan then return nil, planReason end
+	local nextRows, finalByToken, currentToken = plan.nextRows, plan.finalByToken, plan.currentToken
+	local changed, removed = plan.changed, plan.removed
+	local old = { rows=self.rows, semanticById=self.semanticById, parentByKey=self.parentByKey,
+		projectedRows=self.projectedRows, projectedByParentKey=self.projectedByParentKey,
+		firstPageParentKey=self.firstPageParentKey, childPageStates=self.childPageStates,
+		activePageParentKey=self.activePageParentKey, pageState=self.pageState, page=self.page,
+		childPages=self.childPages, expanded=self.expanded, semanticSelection=self.semanticSelection,
+		semanticSelections=self.semanticSelections, offset=self.scroll:getScrollOffset(), listData=self.list.data,
+		imageToken=self._rowImageToken }
+	local semantics, parents = copyMap(self.semanticById), copyMap(self.parentByKey)
+	for token in pairs(changed) do
+		local oldKey = currentToken[token]
+		if oldKey ~= nil then
+			parents[oldKey] = nil
+			local oldParent = self.parentByKey[oldKey]
+			semantics[semanticId("parent", oldKey)] = nil
+			for childIndex = 1, #(oldParent and oldParent.children or {}) do
+				local child = oldParent.children[childIndex]
+				local childKey = self.expansion and self.expansion.keyOf
+					and self.expansion.keyOf(child, childIndex, oldParent.item)
+					or (tostring(oldKey) .. ":" .. tostring(childIndex))
+				semantics[semanticId("child", childKey, oldKey)] = nil
+			end
+		end
+	end
+	local firstExpandable = nil
+	for index = 1, #nextRows do
+		local row = nextRows[index]
+		local key, reason = patchKey(self, row, index)
+		if key == nil then return nil, reason end
+		local token = type(key) .. ":" .. tostring(key)
+		if changed[token] then
+			local id = semanticId("parent", key)
+			local parent = { id=id, kind="parent", key=key, item=row, index=index }
+			local ok, children, hasChildren = pcall(self._children, self, row, index)
+			if not ok then return nil, children end
+			parent.children, parent.hasChildren = children, hasChildren
+			semantics[id], parents[key] = parent, parent
+			if hasChildren and not firstExpandable then firstExpandable = key end
+			local childKeys = {}
+			for childIndex = 1, #(children or {}) do
+				local child = children[childIndex]
+				local childKey = self.expansion.keyOf and self.expansion.keyOf(child, childIndex, row)
+					or (tostring(key) .. ":" .. tostring(childIndex))
+				if (type(childKey) ~= "string" and type(childKey) ~= "number") or tostring(childKey) == ""
+					or type(childKey) == "number" and childKey ~= childKey then return nil, "invalid_child_key" end
+				local childToken = tostring(childKey)
+				if childKeys[childToken] then return nil, "duplicate_child_key:" .. childToken end
+				childKeys[childToken] = true
+				local childId = semanticId("child", childKey, key)
+				semantics[childId] = { id=childId, kind="child", key=childKey,
+					parentKey=key, item=child, index=childIndex, parentItem=row }
+			end
+		else
+			local parent = parents[key]
+			if not parent then return nil, "missing_semantic:" .. tostring(key) end
+			if parent.hasChildren and not firstExpandable then firstExpandable = key end
+		end
+	end
+
+	local blocks = copyMap(self.projectedByParentKey)
+	local stagedChildStates = copyMap(self.childPageStates)
+	local stagedChildPages = copyMap(self.childPages)
+	local stagedExpanded = copyMap(self.expanded)
+	for token in pairs(removed) do
+		local key = currentToken[token]
+		stagedChildStates[key], stagedChildPages[key] = nil, nil
+		stagedExpanded[key] = nil
+	end
+	self.childPageStates, self.childPages, self.expanded = stagedChildStates, stagedChildPages, stagedExpanded
+	self.activePageParentKey, self.pageState, self.page = old.activePageParentKey, old.pageState, old.page
+	if self.activePageParentKey ~= nil and not parents[self.activePageParentKey] then
+		self.activePageParentKey = nil
+	end
+	for token in pairs(changed) do
+		local key = finalByToken[token] and finalByToken[token].key or currentToken[token]
+		blocks[key] = nil
+		if finalByToken[token] then
+			local block = {}
+			local ok, cause = true, nil
+			if self.expansion then
+				ok, cause = pcall(self._projectParent, self, parents[key], block, semantics)
+			else
+				local parent = parents[key]
+				block[1] = { data=parent.item, depth=0, key=key, visualKey=parent.id,
+					semantic=parent, sourceIndex=parent.index, hasChildren=false }
+			end
+			if not ok then self.childPageStates=old.childPageStates; self.childPages=old.childPages; self.expanded=old.expanded; self.activePageParentKey=old.activePageParentKey; self.pageState=old.pageState; self.page=old.page; return nil, cause end
+			blocks[key] = block
+		end
+	end
+	local stagedActive = self.activePageParentKey
+	local stagedPageState = stagedActive and stagedChildStates[stagedActive]
+		or pageState(0, 1, self.pagination and self.pagination.pageSize or 15)
+	local stagedPage = stagedPageState.page
+	self.childPageStates, self.childPages, self.expanded, self.activePageParentKey, self.pageState, self.page = old.childPageStates, old.childPages, old.expanded, old.activePageParentKey, old.pageState, old.page
+	local projected, indexChanges = {}, {}
+	for index = 1, #nextRows do
+		local key = patchKey(self, nextRows[index], index)
+		local parent = parents[key]
+		indexChanges[#indexChanges + 1] = { parent=parent, index=parent.index }
+		parent.index = index
+		local block = blocks[key] or {}
+		for blockIndex = 1, #block do
+			if block[blockIndex].depth == 0 then
+				indexChanges[#indexChanges + 1] = { projected=block[blockIndex], index=block[blockIndex].sourceIndex }
+			end
+			block[blockIndex].sourceIndex = block[blockIndex].depth == 0 and index or block[blockIndex].sourceIndex
+			projected[#projected + 1] = block[blockIndex]
+		end
+	end
+	if not self.expansion and self.pagination then
+		local state = pageState(#projected, self.page, self.pagination.pageSize)
+		local paged = {}
+		for index = state.first, state.last do paged[#paged + 1] = projected[index] end
+		projected, stagedPageState, stagedPage = paged, state, state.page
+	end
+
+	self.rows, self.semanticById, self.parentByKey = nextRows, semantics, parents
+	self.projectedByParentKey, self.firstPageParentKey = blocks, firstExpandable
+	self.childPageStates, self.childPages, self.expanded, self.activePageParentKey = stagedChildStates, stagedChildPages, stagedExpanded, stagedActive
+	self.pageState, self.page = stagedPageState, stagedPage
+	local selectionId = old.semanticSelection and old.semanticSelection.id
+	self.semanticSelection = selectionId and semantics[selectionId] or nil
+	local liveSelections = {}
+	for id in pairs(self.semanticSelections) do if semantics[id] then liveSelections[id] = true end end
+	self.semanticSelections = liveSelections
+	local ok, accepted, reason = pcall(self._publishProjected, self, projected, true)
+	if ok and accepted ~= false and accepted ~= nil then
+		local imageToken = {}
+		self._rowImageToken = imageToken
+		local used = false
+		local function undo()
+			if used or self.disposed or self._rowImageToken ~= imageToken then
+				return false, "image_superseded"
+			end
+			used = true
+			local restored, restoreReason = restorePatchImage(self, old, indexChanges)
+			if restored then self._rowImageToken = old.imageToken end
+			return restored, restoreReason
+		end
+		local function isCurrent() return not self.disposed and self._rowImageToken == imageToken end
+		return true, nil, undo, isCurrent
+	end
+	restorePatchImage(self, old, indexChanges)
+	if not ok then return nil, accepted end
+	return nil, reason or "patch_rejected"
 end
 
 function TableInstance:setColumns(columns)
@@ -1420,7 +1737,7 @@ function TableInstance:dispose()
 	detach(self.root and self.root.panel, self.pager)
 	detach(self.root and self.root.panel, self.emptyPanel)
 	if self.root then self.root:dispose() end
-	self.rows, self.projectedRows, self.expanded = {}, {}, {}
+	self.rows, self.projectedRows, self.projectedByParentKey, self.expanded = {}, {}, {}, {}
 	self.semanticById, self.parentByKey, self.childPages, self.childPageStates = {}, {}, {}, {}
 	self.semanticSelections = {}
 	self.semanticSelection = nil
