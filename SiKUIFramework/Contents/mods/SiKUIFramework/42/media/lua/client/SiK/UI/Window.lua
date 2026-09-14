@@ -1286,7 +1286,8 @@ function Window.apply(panel, options)
 			h = math.max(limits.minHeight, math.min(limits.maxHeight, n(height, self.height))) })
 		self:setX(current.x); self:setY(current.y)
 		self:setWidth(current.w); self:setHeight(current.h)
-		Window.reflow(self)
+		-- Modal/Shell wrappers own their inner content and consumer callback.
+		self:reflow()
 		return self
 	end
 	function panel:updateConstraints(overrides)

@@ -394,7 +394,6 @@ function Modal.fitContent(panel, contentHeight, options)
                                 environment = options.environment,
                         })
                 end
-                panel:reflow()
                 return desired
         end
         -- A wrapped dialogue can gain or lose a scrollbar after Window clamps it to
