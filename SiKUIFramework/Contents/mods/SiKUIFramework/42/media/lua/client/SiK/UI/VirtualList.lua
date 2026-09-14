@@ -32,13 +32,26 @@ function ListInstance:_key(item, index)
 	return index
 end
 
+function ListInstance:_sourceCount()
+	if self.provider then return self.providerCount end
+	return #self.data
+end
+
+function ListInstance:_sourceItem(index)
+	if index > self:_sourceCount() then return nil, true end
+	if not self.provider then return self.data[index], true end
+	local ok, item = pcall(self.provider.get, index)
+	if not ok then return nil, false, "provider_get_failed" end
+	return item, true
+end
+
 function ListInstance:_poolSize()
 	local rect = self.scroll:getViewportRect()
 	return SiK.UI.Scroll.rowPoolSizeForViewport(rect.h, self.rowHeight, self.buffer)
 end
 
 function ListInstance:_resizePool()
-	local wanted = math.min(#self.data, self:_poolSize())
+	local wanted = math.min(self:_sourceCount(), self:_poolSize())
 	while #self.pool < wanted do
 		local rect = self.scroll:getViewportRect()
 		local row = (self.createRow or defaultRow)(self, rect.w, self.rowHeight)
@@ -159,7 +172,8 @@ function ListInstance:refresh()
 	for poolIndex = 1, #self.pool do
 		local dataIndex = first + poolIndex - 1
 		local row = self.pool[poolIndex]
-		local item = self.data[dataIndex]
+		local item, read, readReason = self:_sourceItem(dataIndex)
+		if not read then return nil, readReason end
 		if item ~= nil then
 			local key = self:_key(item, dataIndex)
 			row._sikItem = item
@@ -189,6 +203,8 @@ end
 
 function ListInstance:setData(data, preserveOffset)
 	if self.disposed then return nil, "disposed" end
+	self.provider = nil
+	self.providerCount = 0
 	self.data = type(data) == "table" and data or {}
 	local _, refreshed = self.scroll:update({
 		offset = preserveOffset and self.scroll:getScrollOffset() or 0,
@@ -201,6 +217,35 @@ function ListInstance:setData(data, preserveOffset)
 		end
 		if not found then self.selectedKey = nil end
 	end
+	if refreshed then return true end
+	return self:refresh()
+end
+
+function ListInstance:setProvider(provider, preserveOffset)
+	if self.disposed then return nil, "disposed" end
+	if type(provider) ~= "table" or type(provider.count) ~= "function"
+		or type(provider.get) ~= "function" or type(provider.containsKey) ~= "function" then
+		return nil, "invalid_provider"
+	end
+	local ok, count = pcall(provider.count)
+	if not ok then return nil, "provider_count_failed" end
+	if type(count) ~= "number" or count < 0 or count ~= math.floor(count) then
+		return nil, "invalid_provider_count"
+	end
+	local contains = true
+	if self.selectedKey ~= nil and not self.retainMissingSelection then
+		ok, contains = pcall(provider.containsKey, self.selectedKey)
+		if not ok then return nil, "provider_contains_failed" end
+		if type(contains) ~= "boolean" then return nil, "invalid_provider_contains" end
+	end
+	self.provider = provider
+	self.providerCount = count
+	self.data = {}
+	local _, refreshed = self.scroll:update({
+		offset = preserveOffset and self.scroll:getScrollOffset() or 0,
+		contentHeight = count * self.rowHeight,
+	}, "provider")
+	if not contains then self.selectedKey = nil end
 	if refreshed then return true end
 	return self:refresh()
 end
@@ -231,7 +276,7 @@ function ListInstance:setFocusedKey(key)
 end
 
 function ListInstance:isEmpty()
-	return #self.data == 0
+	return self:_sourceCount() == 0
 end
 
 function ListInstance:captureState()
@@ -281,6 +326,8 @@ function ListInstance:dispose()
 	for index = 1, #snapshot do disposeRow(self, snapshot[index]) end
 	if self.ownsScroll then self.scroll:dispose() end
 	self.data = {}
+	self.provider = nil
+	self.providerCount = 0
 	self.scroll = nil
 	self.createRow = nil
 	self.updateRow = nil
@@ -306,6 +353,8 @@ function VirtualList.create(options)
 		scroll = scroll,
 		ownsScroll = ownsScroll,
 		data = {},
+		provider = nil,
+		providerCount = 0,
 		pool = {},
 		rowHeight = math.max(1, tonumber(options.rowHeight) or 32),
 		buffer = math.max(1, math.floor(tonumber(options.buffer) or 2)),
@@ -324,7 +373,12 @@ function VirtualList.create(options)
 	}, ListInstance)
 	instance.scrollListener = function() instance:refresh() end
 	scroll:subscribe(instance.scrollListener)
-	local ok, reason = instance:setData(options.data or {}, options.preserveOffset == true)
+	local ok, reason
+	if options.provider ~= nil then
+		ok, reason = instance:setProvider(options.provider, options.preserveOffset == true)
+	else
+		ok, reason = instance:setData(options.data or {}, options.preserveOffset == true)
+	end
 	if not ok then
 		instance:dispose()
 		return nil, reason

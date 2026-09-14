@@ -5,6 +5,7 @@ require "SiK/UI/Theme"
 require "SiK/UI/Container"
 require "SiK/UI/Scroll"
 require "SiK/UI/VirtualList"
+require "SiK/UI/OrderedBlocks"
 require "SiK/UI/Controls"
 require "SiK/UI/Block"
 
@@ -16,6 +17,26 @@ SiK.UI.Namespace.define("Table", Table)
 
 local TableInstance = {}
 TableInstance.__index = TableInstance
+local patchKey
+
+local function journalSet(journal, target, key, value)
+	local seen = journal.seen[target]
+	if not seen then seen = {}; journal.seen[target] = seen end
+	if not seen[key] then
+		seen[key] = true
+		journal[#journal + 1] = { target = target, key = key,
+			present = target[key] ~= nil, value = target[key] }
+	end
+	target[key] = value
+end
+
+local function restoreJournal(journal)
+	for index = #journal, 1, -1 do
+		local entry = journal[index]
+		if entry.present then entry.target[entry.key] = entry.value
+		else entry.target[entry.key] = nil end
+	end
+end
 
 local function numberOr(value, fallback)
 	value = tonumber(value)
@@ -1010,6 +1031,11 @@ local function reservedPagerHeight(instance)
 	return instance.pagerHeight
 end
 
+function TableInstance:_visibleRowCount()
+	if self.keyedMode then return SiK.UI.OrderedBlocks.projectedCount(self.keyedRoot) end
+	return #self.projectedRows
+end
+
 function TableInstance:_syncGeometry()
 	if self.disposed then return end
 	local visiblePagerHeight = reservedPagerHeight(self)
@@ -1018,7 +1044,7 @@ function TableInstance:_syncGeometry()
 		tostring(content.w), tostring(content.h), tostring(self.root.w),
 		tostring(self.root.h), tostring(self.blockHeaderHeight),
 		tostring(self.metrics.headerHeight), tostring(visiblePagerHeight),
-		tostring(#self.projectedRows) }, ":")
+		tostring(self:_visibleRowCount()) }, ":")
 	if self._geometrySignature == signature then return self end
 	self._geometrySignature = signature
 	local y = content.y
@@ -1050,14 +1076,14 @@ function TableInstance:_syncGeometry()
 	-- own container.
 	self.columnLayout = Table.resolveColumns(content.w, self.columns, self.columnOptions)
 	local _, refreshed = self.scroll:update({ viewportRect = rowsRect, trackRect = trackRect,
-		trackRectSet = true, contentHeight = #self.projectedRows * self.metrics.rowHeight }, "table-geometry")
+		trackRectSet = true, contentHeight = self:_visibleRowCount() * self.metrics.rowHeight }, "table-geometry")
 	if self.emptyPanel then SiK.UI.Layout.apply(self.emptyPanel, rowsRect) end
 	if self.list and not refreshed then self.list:refresh() end
 	return self
 end
 
 function TableInstance:getRequiredHeight(rowCount)
-	local count = math.max(0, math.floor(numberOr(rowCount, #self.projectedRows)))
+	local count = math.max(0, math.floor(numberOr(rowCount, self:_visibleRowCount())))
 	count = math.max(self.minRows, count)
 	if self.maxRows then count = math.min(self.maxRows, count) end
 	local height = self.paddingY * 2 + self.blockHeaderHeight + self.blockHeaderGap + self.metrics.headerHeight
@@ -1070,7 +1096,7 @@ end
 --- Explicit content mode is for a parent ScrollDock: every projected row is
 --- visible in this widget and the outer Dock is the only vertical scroller.
 function TableInstance:getIntrinsicHeight()
-	return self:getRequiredHeight(#self.projectedRows)
+	return self:getRequiredHeight(self:_visibleRowCount())
 end
 
 function TableInstance:_applyAutoHeight()
@@ -1106,24 +1132,87 @@ function TableInstance:_publishProjected(projected, preserveOffset)
 	return result, reason
 end
 
+function TableInstance:_keyedProvider(root)
+	local owner = self
+	return {
+		count = function() return SiK.UI.OrderedBlocks.projectedCount(root) end,
+		get = function(index)
+			local projected, rootIndex, entry = SiK.UI.OrderedBlocks.projectedAt(root, index)
+			if projected and projected.depth == 0 then
+				projected.sourceIndex = rootIndex
+				if projected.semantic then projected.semantic.index = rootIndex end
+			end
+			if entry and entry.block and entry.block[1] and entry.block[1].semantic then
+				entry.block[1].semantic.index = rootIndex
+			end
+			return projected
+		end,
+		containsKey = function(key) return owner.semanticById[key] ~= nil end,
+	}
+end
+
+function TableInstance:_publishKeyed(root, preserveOffset)
+	local previousOffset = preserveOffset == true and self.scroll:getScrollOffset() or 0
+	self.keyedRoot = root
+	self.keyedMode = true
+	self.rows, self.projectedRows = {}, {}
+	if self.pager then self.pager:setVisible(reservedPagerHeight(self) > 0) end
+	local count = SiK.UI.OrderedBlocks.projectedCount(root)
+	local chromeHeight = self.blockHeaderHeight + self.blockHeaderGap
+		+ self.metrics.headerHeight + reservedPagerHeight(self)
+	local contentHeight = chromeHeight + count * self.metrics.rowHeight
+	self.root:setContentHeight(contentHeight)
+	if self.root.directBlock then self.root.block:setContentHeight(contentHeight) end
+	self:_applyAutoHeight()
+	if self.emptyPanel then self.emptyPanel:setVisible(count == 0) end
+	local result, reason = self.list:setProvider(self:_keyedProvider(root), preserveOffset == true)
+	if result and preserveOffset == true then self.scroll:setScrollOffset(previousOffset) end
+	return result, reason
+end
+
 function TableInstance:_refreshRows(preserveOffset)
+	if self.keyedMode then return self:_publishKeyed(self.keyedRoot, preserveOffset) end
 	return self:_publishProjected(self:_projectRows(), preserveOffset)
 end
 
 function TableInstance:setRows(rows, preserveOffset)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if self.disposed then return nil, "disposed" end
+	self.keyedMode, self.keyedRoot, self.rootEntryByKey = false, nil, {}
 	self.rows = type(rows) == "table" and rows or {}
 	self:_rebuildSemanticIndex()
+	local projected = self:_projectRows()
+	if self.keyedComparator then
+		local root, entries = nil, {}
+		local function less(left, right) return self.keyedComparator(left.row, right.row) end
+		for index = 1, #self.rows do
+			local row = self.rows[index]
+			local key, keyReason = patchKey(self, row, index)
+			if key == nil then return nil, keyReason end
+			if entries[key] ~= nil then return nil, "duplicate_current_key:" .. tostring(key) end
+			local entry = { key = key, row = row, block = self.projectedByParentKey[key] or {} }
+			local ok, nextRoot = pcall(SiK.UI.OrderedBlocks.insert, root, entry, less)
+			if not ok then return nil, nextRoot end
+			if SiK.UI.OrderedBlocks.count(nextRoot) ~= SiK.UI.OrderedBlocks.count(root) + 1 then
+				return nil, "keyed_comparator_collision:" .. tostring(key)
+			end
+			root, entries[key] = nextRoot, entry
+		end
+		self.rootEntryByKey = entries
+		local accepted, reason = self:_publishKeyed(root, preserveOffset ~= false)
+		if accepted ~= false and accepted ~= nil then self._rowImageToken = {} end
+		return accepted, reason
+	end
 	-- A data refresh is not a navigation request.  Keep the user's semantic
 	-- position unless the caller explicitly starts a new result set.
-	local accepted, reason = self:_refreshRows(preserveOffset ~= false)
+	local accepted, reason = self:_publishProjected(projected, preserveOffset ~= false)
 	if accepted ~= false and accepted ~= nil then
 		self._rowImageToken = {}
 	end
 	return accepted, reason
 end
 
-local function patchKey(instance, row, index)
+patchKey = function(instance, row, index)
 	local ok, key = pcall(instance.keyOf, row, index)
 	if not ok then return nil, key end
 	if (type(key) ~= "string" and type(key) ~= "number") or tostring(key) == "" then
@@ -1274,6 +1363,7 @@ end
 --- for unchanged roots. `order`, when present, is the complete final key order.
 function TableInstance:patchRows(spec)
 	if self.disposed then return nil, "disposed" end
+	if self.keyedMode then return nil, "keyed_patch_required" end
 	local plan, planReason = prepareRowPatch(self, spec)
 	if not plan then return nil, planReason end
 	local nextRows, finalByToken, currentToken = plan.nextRows, plan.finalByToken, plan.currentToken
@@ -1425,6 +1515,283 @@ function TableInstance:patchRows(spec)
 	return nil, reason or "patch_rejected"
 end
 
+local function keyedChildKey(self, child, childIndex, parent, parentKey)
+	if self.expansion and self.expansion.keyOf then
+		return self.expansion.keyOf(child, childIndex, parent)
+	end
+	return tostring(parentKey) .. ":" .. tostring(childIndex)
+end
+
+local function prepareKeyedParent(self, row, key, rootIndex)
+	local parentId = semanticId("parent", key)
+	local parent = { id = parentId, kind = "parent", key = key, item = row, index = rootIndex }
+	local ok, children, hasChildren = pcall(self._children, self, row, rootIndex)
+	if not ok then return nil, children end
+	parent.children, parent.hasChildren = children, hasChildren
+	local semantics = { parent }
+	local ids = { [parentId] = true }
+	for childIndex = 1, #(children or {}) do
+		local child = children[childIndex]
+		local childOk, childKey = pcall(keyedChildKey, self, child, childIndex, row, key)
+		if not childOk then return nil, childKey end
+		if (type(childKey) ~= "string" and type(childKey) ~= "number") or tostring(childKey) == ""
+			or type(childKey) == "number" and childKey ~= childKey then return nil, "invalid_child_key" end
+		local childId = semanticId("child", childKey, key)
+		if ids[childId] then return nil, "duplicate_child_key:" .. tostring(childKey) end
+		ids[childId] = true
+		semantics[#semantics + 1] = { id = childId, kind = "child", key = childKey,
+			parentKey = key, item = child, index = childIndex, parentItem = row }
+	end
+	return { parent = parent, semantics = semantics, ids = ids }
+end
+
+local function restoreKeyedImage(self, old, journal)
+	restoreJournal(journal)
+	self.firstPageParentKey, self.activePageParentKey = old.firstPageParentKey, old.activePageParentKey
+	self.pageState, self.page, self.semanticSelection = old.pageState, old.page, old.semanticSelection
+	self.keyedRoot = old.root
+	local ok, accepted, reason = pcall(self._publishKeyed, self, old.root, true)
+	self.scroll:setScrollOffset(old.offset)
+	if not ok then return nil, accepted end
+	if accepted == false or accepted == nil then return nil, reason or "undo_rejected" end
+	return true
+end
+
+--- Applies a root-keyed persistent delta. This path never materializes or sorts
+--- the complete root order; only affected semantic and projected blocks mutate.
+function TableInstance:_patchRoots(spec)
+	if self.disposed then return nil, "disposed" end
+	if not self.keyedMode or not self.keyedComparator then return nil, "keyed_mode_disabled" end
+	if type(spec) ~= "table" then return nil, "invalid_patch" end
+	local upserts, removeKeys = spec.upserts or {}, spec.removeKeys or {}
+	if spec.order ~= nil or type(upserts) ~= "table" or type(removeKeys) ~= "table" then
+		return nil, "invalid_root_patch"
+	end
+	local dense, reason = validateDenseArray(upserts, "upserts")
+	if not dense then return nil, reason end
+	dense, reason = validateDenseArray(removeKeys, "remove_keys")
+	if not dense then return nil, reason end
+
+	local removals, removalTokens, upsertPlans, patchTokens, semanticPatchTokens = {}, {}, {}, {}, {}
+	for index = 1, #removeKeys do
+		local key = removeKeys[index]
+		if (type(key) ~= "string" and type(key) ~= "number") or tostring(key) == ""
+			or type(key) == "number" and key ~= key then return nil, "invalid_remove_key" end
+		local token = type(key) .. ":" .. tostring(key)
+		if patchTokens[token] then return nil, "duplicate_remove_key:" .. tostring(key) end
+		local oldEntry = self.rootEntryByKey[key]
+		if not oldEntry then return nil, "unknown_remove_key:" .. tostring(key) end
+		patchTokens[token], removalTokens[token] = true, true
+		removals[#removals + 1] = { key = key, entry = oldEntry }
+	end
+	for index = 1, #upserts do
+		local row = upserts[index]
+		if type(row) ~= "table" then return nil, "invalid_upsert" end
+		local key, keyReason = patchKey(self, row, index)
+		if key == nil then return nil, keyReason end
+		local token = type(key) .. ":" .. tostring(key)
+		if patchTokens[token] then return nil, "duplicate_patch_key:" .. tostring(key) end
+		local semanticToken = tostring(key)
+		if semanticPatchTokens[semanticToken] then
+			return nil, "duplicate_semantic_key:" .. semanticToken
+		end
+		local existingSemantic = self.semanticById[semanticId("parent", key)]
+		if existingSemantic and existingSemantic.key ~= key then
+			local existingToken = type(existingSemantic.key) .. ":" .. tostring(existingSemantic.key)
+			if not removalTokens[existingToken] then return nil, "duplicate_semantic_key:" .. semanticToken end
+		end
+		patchTokens[token] = true
+		semanticPatchTokens[semanticToken] = true
+		upsertPlans[#upsertPlans + 1] = { key = key, row = row,
+			oldEntry = self.rootEntryByKey[key] }
+	end
+
+	local old = { root = self.keyedRoot, offset = self.scroll:getScrollOffset(),
+		firstPageParentKey = self.firstPageParentKey, activePageParentKey = self.activePageParentKey,
+		pageState = self.pageState, page = self.page, semanticSelection = self.semanticSelection,
+		imageToken = self._rowImageToken }
+	local nextRoot = old.root
+	local function less(left, right) return self.keyedComparator(left.row, right.row) end
+	for index = 1, #removals do
+		local ok, value = pcall(SiK.UI.OrderedBlocks.remove, nextRoot, removals[index].entry, less)
+		if not ok then return nil, value end
+		nextRoot = value
+	end
+	for index = 1, #upsertPlans do
+		local plan = upsertPlans[index]
+		if plan.oldEntry then
+			local ok, value = pcall(SiK.UI.OrderedBlocks.remove, nextRoot, plan.oldEntry, less)
+			if not ok then return nil, value end
+			nextRoot = value
+		end
+		plan.entry = { key = plan.key, row = plan.row, block = {} }
+		local before = SiK.UI.OrderedBlocks.count(nextRoot)
+		local ok, value = pcall(SiK.UI.OrderedBlocks.insert, nextRoot, plan.entry, less)
+		if not ok then return nil, value end
+		if SiK.UI.OrderedBlocks.count(value) ~= before + 1 then
+			return nil, "keyed_comparator_collision:" .. tostring(plan.key)
+		end
+		nextRoot = value
+	end
+	for index = 1, #upsertPlans do
+		local plan = upsertPlans[index]
+		local rankOk, rootIndex = pcall(SiK.UI.OrderedBlocks.rank, nextRoot, plan.entry, less)
+		if not rankOk then return nil, rootIndex end
+		local prepared, prepareReason = prepareKeyedParent(self, plan.row, plan.key, rootIndex)
+		if not prepared then return nil, prepareReason end
+		plan.prepared = prepared
+	end
+
+	local journal = { seen = {} }
+	local touchedIds = {}
+	local function touchOld(entry)
+		if not entry then return true end
+		local oldParent = self.parentByKey[entry.key]
+		if oldParent then
+			touchedIds[oldParent.id] = true
+			journalSet(journal, self.semanticById, oldParent.id, nil)
+			for childIndex = 1, #(oldParent.children or {}) do
+				local child = oldParent.children[childIndex]
+				local childOk, childKey = pcall(keyedChildKey, self, child, childIndex,
+					oldParent.item, entry.key)
+				if not childOk then return nil, childKey end
+				local childId = semanticId("child", childKey, entry.key)
+				touchedIds[childId] = true
+				journalSet(journal, self.semanticById, childId, nil)
+			end
+		end
+		journalSet(journal, self.parentByKey, entry.key, nil)
+		journalSet(journal, self.projectedByParentKey, entry.key, nil)
+		journalSet(journal, self.rootEntryByKey, entry.key, nil)
+		return true
+	end
+	for index = 1, #removals do
+		local touched, cause = touchOld(removals[index].entry)
+		if not touched then restoreJournal(journal); return nil, cause end
+	end
+	for index = 1, #upsertPlans do
+		local touched, cause = touchOld(upsertPlans[index].oldEntry)
+		if not touched then restoreJournal(journal); return nil, cause end
+	end
+	for index = 1, #removals do
+		local key = removals[index].key
+		journalSet(journal, self.childPageStates, key, nil)
+		journalSet(journal, self.childPages, key, nil)
+		journalSet(journal, self.expanded, key, nil)
+		if self.activePageParentKey == key then self.activePageParentKey = nil end
+		if self.firstPageParentKey == key then self.firstPageParentKey = nil end
+	end
+	for index = 1, #upsertPlans do
+		local plan, prepared = upsertPlans[index], upsertPlans[index].prepared
+		journalSet(journal, self.parentByKey, plan.key, prepared.parent)
+		for semanticIndex = 1, #prepared.semantics do
+			local semantic = prepared.semantics[semanticIndex]
+			touchedIds[semantic.id] = true
+			journalSet(journal, self.semanticById, semantic.id, semantic)
+		end
+		if prepared.parent.hasChildren and self.firstPageParentKey == nil then
+			self.firstPageParentKey = plan.key
+		end
+	end
+
+	for index = 1, #upsertPlans do
+		local plan = upsertPlans[index]
+		journalSet(journal, self.childPageStates, plan.key, nil)
+		if not plan.prepared.parent.hasChildren then
+			journalSet(journal, self.childPages, plan.key, nil)
+			if self.activePageParentKey == plan.key then self.activePageParentKey = nil end
+			if self.firstPageParentKey == plan.key then self.firstPageParentKey = nil end
+		end
+		local block = {}
+		local ok, cause = true, nil
+		if self.expansion then
+			ok, cause = pcall(self._projectParent, self, plan.prepared.parent, block, self.semanticById)
+		else
+			local parent = plan.prepared.parent
+			block[1] = { data = parent.item, depth = 0, key = plan.key, visualKey = parent.id,
+				semantic = parent, sourceIndex = parent.index, hasChildren = false }
+		end
+		if not ok then
+			restoreJournal(journal)
+			self.firstPageParentKey, self.activePageParentKey = old.firstPageParentKey, old.activePageParentKey
+			self.pageState, self.page, self.semanticSelection = old.pageState, old.page, old.semanticSelection
+			return nil, cause
+		end
+		plan.entry = { key = plan.key, row = plan.row, block = block }
+		local insertOk, value = pcall(SiK.UI.OrderedBlocks.insert, nextRoot, plan.entry, less)
+		if not insertOk then
+			restoreJournal(journal)
+			self.firstPageParentKey, self.activePageParentKey = old.firstPageParentKey, old.activePageParentKey
+			self.pageState, self.page, self.semanticSelection = old.pageState, old.page, old.semanticSelection
+			return nil, value
+		end
+		nextRoot = value
+		journalSet(journal, self.projectedByParentKey, plan.key, block)
+		journalSet(journal, self.rootEntryByKey, plan.key, plan.entry)
+	end
+	for id in pairs(touchedIds) do
+		if self.semanticById[id] == nil then journalSet(journal, self.semanticSelections, id, nil)
+		else journalSet(journal, self.semanticSelections, id, self.semanticSelections[id]) end
+	end
+	local selectionId = old.semanticSelection and old.semanticSelection.id
+	self.semanticSelection = selectionId and self.semanticById[selectionId] or nil
+	local active = self.activePageParentKey
+	self.pageState = active and self.childPageStates[active]
+		or pageState(0, 1, self.pagination and self.pagination.pageSize or 15)
+	self.page = self.pageState.page
+
+	local imageToken = {}
+	self._rowImageToken = imageToken
+	local ok, accepted, publishReason = pcall(self._publishKeyed, self, nextRoot, true)
+	if self._rowImageToken ~= imageToken then
+		pcall(self._publishKeyed, self, self.keyedRoot, true)
+		return nil, "image_superseded"
+	end
+	if ok and accepted ~= false and accepted ~= nil then
+		local used = false
+		local function undo()
+			if used or self.disposed or self._rowImageToken ~= imageToken then
+				return false, "image_superseded"
+			end
+			used = true
+			local restoreToken = {}
+			self._rowImageToken = restoreToken
+			local restored, restoreReason = restoreKeyedImage(self, old, journal)
+			if self._rowImageToken ~= restoreToken then
+				pcall(self._publishKeyed, self, self.keyedRoot, true)
+				return false, "image_superseded"
+			end
+			if restored then self._rowImageToken = old.imageToken
+			else self._rowImageToken = imageToken end
+			return restored, restoreReason
+		end
+		local function isCurrent() return not self.disposed and self._rowImageToken == imageToken end
+		return true, nil, undo, isCurrent
+	end
+	local restoreToken = {}
+	self._rowImageToken = restoreToken
+	local restored, restoreReason = restoreKeyedImage(self, old, journal)
+	if self._rowImageToken ~= restoreToken then
+		pcall(self._publishKeyed, self, self.keyedRoot, true)
+		return nil, "image_superseded"
+	end
+	self._rowImageToken = old.imageToken
+	if not restored then return nil, restoreReason end
+	if not ok then return nil, accepted end
+	return nil, publishReason or "patch_rejected"
+end
+
+-- Product callbacks can run while the visible provider binds its rows. They
+-- cannot start a second write over an uncommitted semantic-map journal.
+function TableInstance:patchRoots(spec)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
+	self._patchRootsActive = true
+	local called, accepted, reason, undo, isCurrent = pcall(self._patchRoots, self, spec)
+	self._patchRootsActive = nil
+	if not called then return nil, accepted end
+	return accepted, reason, undo, isCurrent
+end
+
 function TableInstance:setColumns(columns)
 	if self.disposed then return nil, "disposed" end
 	local normalized, reason = normalizedColumns(columns)
@@ -1452,11 +1819,46 @@ function TableInstance:getHeight() return self.root.h end
 function TableInstance:getVisibleDataRows()
 	local rows = {}
 	if self.disposed then return rows end
-	for i = 1, #self.projectedRows do
-		local projected = self.projectedRows[i]
+	local count = self:_visibleRowCount()
+	for i = 1, count do
+		local projected = self.keyedMode and SiK.UI.OrderedBlocks.projectedAt(self.keyedRoot, i)
+			or self.projectedRows[i]
 		if projected.kind ~= "pager" and projected.data ~= nil then rows[#rows + 1] = projected.data end
 	end
 	return rows
+end
+
+function TableInstance:getRootRows()
+	local rows = {}
+	if self.disposed then return rows end
+	if not self.keyedMode then
+		for index = 1, #self.rows do rows[index] = self.rows[index] end
+		return rows
+	end
+	for index = 1, SiK.UI.OrderedBlocks.count(self.keyedRoot) do
+		local entry = SiK.UI.OrderedBlocks.at(self.keyedRoot, index)
+		rows[index] = entry.row
+	end
+	return rows
+end
+
+-- Declarative staging captures the persistent root in O(1). Only exceptional
+-- rollback materializes it again; ordinary geometry and deltas do not.
+function TableInstance:captureRowImage()
+	return {owner=self,keyed=self.keyedMode,root=self.keyedRoot,rows=self.rows}
+end
+function TableInstance:restoreRowImage(image)
+	if type(image)~="table" or image.owner~=self then return nil,"invalid_row_image" end
+	if self._patchRootsActive then return nil,"patch_in_progress" end
+	local rows=image.rows
+	if image.keyed then
+		rows={}
+		for i=1,SiK.UI.OrderedBlocks.count(image.root) do rows[i]=SiK.UI.OrderedBlocks.at(image.root,i).row end
+	end
+	return self:setRows(rows,false)
+end
+function TableInstance:getRootCount()
+	return self.keyedMode and SiK.UI.OrderedBlocks.count(self.keyedRoot) or #self.rows
 end
 
 function TableInstance:layout(spec)
@@ -1590,6 +1992,7 @@ function TableInstance:getPageState(parentKey)
 end
 
 function TableInstance:setPage(page)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if not self.pagination then return nil, "pagination_disabled" end
 	if self.expansion then
 		local parentKey = self.activePageParentKey
@@ -1601,6 +2004,7 @@ function TableInstance:setPage(page)
 end
 
 function TableInstance:setChildPage(parentKey, page)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if not self.pagination or not self.expansion then return nil, "child_pagination_disabled" end
 	if not self.parentByKey[parentKey] or not self.parentByKey[parentKey].children then
 		return nil, "unknown_parent"
@@ -1615,6 +2019,11 @@ function TableInstance:setChildPage(parentKey, page)
 			parent = self.parentByKey[parentKey].item,
 			page = self.childPages[parentKey] })
 	end
+	if self.keyedMode then
+		local parent = self.parentByKey[parentKey]
+		local accepted, reason = self:patchRoots({ upserts = { parent.item } })
+		return accepted, reason
+	end
 	return self:_refreshRows(true)
 end
 
@@ -1627,6 +2036,7 @@ function TableInstance:getChildren(parentKey)
 end
 
 function TableInstance:setSort(key, ascending)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if self.disposed then return nil, "disposed" end
 	self.sortKey = key
 	self.sortAsc = ascending ~= false
@@ -1642,8 +2052,9 @@ local function sortableValue(column, item, index)
 end
 
 function TableInstance:_applyLocalSort(column)
+	local source = self.keyedMode and self:getRootRows() or self.rows
 	local decorated = {}
-	for index = 1, #self.rows do decorated[index] = { item = self.rows[index], index = index } end
+	for index = 1, #source do decorated[index] = { item = source[index], index = index } end
 	table.sort(decorated, function(left, right)
 		local leftType, leftValue = sortableValue(column, left.item, left.index)
 		local rightType, rightValue = sortableValue(column, right.item, right.index)
@@ -1652,7 +2063,10 @@ function TableInstance:_applyLocalSort(column)
 		if equal then return left.index < right.index end
 		return self.sortAsc and before or not before
 	end)
-	for index = 1, #decorated do self.rows[index] = decorated[index].item end
+	local sorted = {}
+	for index = 1, #decorated do sorted[index] = decorated[index].item end
+	if self.keyedMode then return self:setRows(sorted, true) end
+	self.rows = sorted
 	self:_rebuildSemanticIndex()
 	return self:_refreshRows(true)
 end
@@ -1661,6 +2075,7 @@ function TableInstance:previousPage() return self:setPage(self.page - 1) end
 function TableInstance:nextPage() return self:setPage(self.page + 1) end
 
 function TableInstance:toggleExpanded(key)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if not self.expansion then return nil, "expansion_disabled" end
 	if not self.parentByKey[key] then return nil, "unknown_parent" end
 	-- Do not use `expanded[key] and nil or true`: Lua evaluates that form to
@@ -1672,7 +2087,13 @@ function TableInstance:toggleExpanded(key)
 		self.expanded[key] = true
 		self.activePageParentKey = key
 	end
-	local result, reason = self:_refreshRows(true)
+	local result, reason
+	if self.keyedMode then
+		local parent = self.parentByKey[key]
+		result, reason = self:patchRoots({ upserts = { parent.item } })
+	else
+		result, reason = self:_refreshRows(true)
+	end
 	if result and type(self.options.onExpansionChange) == "function" then
 		local parent = self.parentByKey[key]
 		self.options.onExpansionChange({ playerNum = self.playerNum,
@@ -1697,12 +2118,40 @@ function TableInstance:captureState()
 end
 
 function TableInstance:restoreState(state)
+	if self._patchRootsActive then return nil, "patch_in_progress" end
 	if type(state) ~= "table" then return nil, "invalid_state" end
+	local keyedRefresh = {}
+	local keyedSeen = {}
+	if self.keyedMode then
+		for key, value in pairs(self.expanded) do
+			if type(state.expanded) == "table" and state.expanded[key] ~= value then
+				local parent = self.parentByKey[key]
+				if parent then keyedSeen[key], keyedRefresh[#keyedRefresh + 1] = true, parent.item end
+			end
+		end
+		for key, value in pairs(state.expanded or {}) do
+			if self.expanded[key] ~= value and not keyedSeen[key] then
+				local parent = self.parentByKey[key]
+				if parent then keyedSeen[key], keyedRefresh[#keyedRefresh + 1] = true, parent.item end
+			end
+		end
+		for key, value in pairs(state.childPages or {}) do
+			if self.childPages[key] ~= value and not keyedSeen[key] then
+				local parent = self.parentByKey[key]
+				if parent then keyedSeen[key], keyedRefresh[#keyedRefresh + 1] = true, parent.item end
+			end
+		end
+	end
 	if type(state.expanded) == "table" then self.expanded = state.expanded end
 	if type(state.childPages) == "table" then self.childPages = state.childPages end
 	self.activePageParentKey = state.activePageParentKey
 	self.page = math.max(1, math.floor(numberOr(state.page, self.page)))
-	self:_refreshRows(false)
+	if self.keyedMode and #keyedRefresh > 0 then
+		local accepted, reason = self:patchRoots({ upserts = keyedRefresh })
+		if not accepted then return nil, reason end
+	else
+		self:_refreshRows(false)
+	end
 	if state.selectionKind == "child" then
 		self:selectChild(state.selectionParentKey, state.selection)
 	elseif state.selection ~= nil then
@@ -1739,6 +2188,7 @@ function TableInstance:dispose()
 	if self.root then self.root:dispose() end
 	self.rows, self.projectedRows, self.projectedByParentKey, self.expanded = {}, {}, {}, {}
 	self.semanticById, self.parentByKey, self.childPages, self.childPageStates = {}, {}, {}, {}
+	self.keyedRoot, self.rootEntryByKey, self.keyedMode = nil, {}, false
 	self.semanticSelections = {}
 	self.semanticSelection = nil
 	self.list, self.scroll, self.header, self.blockHeader = nil, nil, nil, nil
@@ -1830,6 +2280,9 @@ function Table.create(options)
 	options.columns = columns
 	if options.expansion ~= nil and (type(options.expansion) ~= "table"
 		or type(options.expansion.childrenOf) ~= "function") then return nil, "invalid_expansion" end
+	if options.keyedComparator ~= nil and type(options.keyedComparator) ~= "function" then
+		return nil, "invalid_keyed_comparator"
+	end
 	if options.pagination ~= nil and (type(options.pagination) ~= "table"
 		or numberOr(options.pagination.pageSize, 0) < 1) then return nil, "invalid_pagination" end
 	if options.pagination and options.pagination.external == true
@@ -1895,6 +2348,8 @@ function Table.create(options)
 		maxRows = maximumRows, minHeight = minimumHeight, maxHeight = maximumHeight,
 		rows = {}, projectedRows = {}, keyOf = type(options.keyOf) == "function"
 			and options.keyOf or function(_, index) return index end,
+			keyedComparator = options.keyedComparator, keyedMode = false,
+			keyedRoot = nil, rootEntryByKey = {},
 			expansion = options.expansion, expanded = {},
 			semanticById = {}, parentByKey = {}, semanticSelection = nil,
 			semanticSelections = {}, selectionMode = options.selectionMode == "multiple" and "multiple" or "single",

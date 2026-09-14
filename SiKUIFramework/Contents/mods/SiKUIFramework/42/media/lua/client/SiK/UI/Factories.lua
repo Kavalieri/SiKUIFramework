@@ -172,7 +172,7 @@ local function virtualListFactory(parent, props, context)
 end
 
 local function tableModel(data)
-        if type(data) == "table" and type(data.rows) == "table" then return data end
+        if type(data) == "table" and (type(data.rows) == "table" or data.preserveRows == true) then return data end
         return { rows = type(data) == "table" and data or {} }
 end
 
@@ -631,6 +631,7 @@ end
 
 local function tableCapture(handle)
         return { rows = handle.rows, columns = handle.columns,
+                rowImage = handle.captureRowImage and handle:captureRowImage() or nil,
                 state = handle.captureState and handle:captureState() or nil,
                 onSelect = handle.options and handle.options.onSelect or nil,
                 onRowClick = handle.options and handle.options.onRowClick or nil,
@@ -642,7 +643,8 @@ local function tableRestore(handle, snapshot)
 	if type(snapshot) ~= "table" then return nil, "invalid_table_snapshot" end
         local ok, reason = handle:setColumns(snapshot.columns)
         if not ok then return nil, reason end
-        ok, reason = handle:setRows(snapshot.rows, false)
+        if snapshot.rowImage and handle.restoreRowImage then ok, reason = handle:restoreRowImage(snapshot.rowImage)
+        else ok, reason = handle:setRows(snapshot.rows, false) end
         if not ok then return nil, reason end
         if handle.options then
                 handle.options.onSelect = snapshot.onSelect
@@ -676,8 +678,10 @@ local function tableUpdate(handle, props)
         if model.emptyText ~= nil then handle:setEmptyText(model.emptyText) end
         if model.sortKey ~= nil then handle:setSort(model.sortKey, model.sortAsc) end
         if type(model.expanded) == "table" then handle.expanded = model.expanded end
-        ok, reason = handle:setRows(model.rows, true)
-        if not ok then return nil, reason end
+        if model.preserveRows ~= true then
+            ok, reason = handle:setRows(model.rows, true)
+            if not ok then return nil, reason end
+        end
         if type(model.selectedKeys) == "table" then handle:setSelectedKeys(model.selectedKeys) end
         if model.scrollOffset ~= nil then handle:setScrollOffset(model.scrollOffset) end
         return handle

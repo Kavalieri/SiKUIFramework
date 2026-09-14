@@ -3,8 +3,8 @@ require "SiK/UI/Namespace"
 local Version = SiK.UI.Version or {
 	major = 1,
 	minor = 0,
-	patch = 3,
-	stage = "",
+	patch = 4,
+	stage = "dev1",
 }
 
 function Version.string()

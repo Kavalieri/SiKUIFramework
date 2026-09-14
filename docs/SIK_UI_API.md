@@ -228,7 +228,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.3`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.4-dev1`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
@@ -649,3 +649,36 @@ rows, selection, focus, expansion, pagination and scroll while that published
 image remains current. It returns `false, "image_superseded"` after a newer row
 publication. This lets a consumer keep the undo only for the duration of its own
 transaction and prevents an older failure from overwriting newer UI state.
+
+### Search resize contract (1.0.4-dev1)
+
+`Controls.search` supports `setBounds`, `setWidth` and `setHeight` on the returned
+panel. Each updates the existing editable entry and optional action button to
+the panel's content rectangle. Resizing preserves the entry object, value and
+selection; it does not emit a text-change callback. Disposal remains idempotent.
+This fixes direct width/height consumers such as terminal search and rule fields.
+No changes to the independent component-manifest schema are required.
+
+### Ordered root provider (1.0.4-dev1)
+
+`Table.create({keyedComparator=function(a,b) ... end, ...})` opts into immutable
+root data and a persistent ordered tree. The comparator must be deterministic
+over row values, including a stable key tie-break; changing external sort state
+requires a new bootstrap with `setRows`. `patchRoots({upserts={},removeKeys={}})`
+replaces only affected roots and returns `true,nil,undo,isCurrent`. It accepts
+no global `order` array. Unaffected roots, child semantics and widget identity
+are retained. Reentrant row writers fail with `patch_in_progress` before mutation;
+an undo cannot overwrite a newer published image.
+
+The provider resolves only viewport rows. `getRootCount()` is constant time;
+`getRootRows()` and `getVisibleDataRows()` explicitly materialize snapshots for
+user-driven operations. The legacy `rows`/`projectedRows` arrays are empty in
+this opt-in mode. Legacy tables and `setData` retain their existing contracts.
+`VirtualList:setProvider({count,get,containsKey},preserveOffset)` installs this
+indexed source; `setData` restores the ordinary array path.
+
+`captureRowImage()` captures an opaque table-owned immutable image in constant
+time; `restoreRowImage(image)` restores it using the exceptional full rebuild
+path. Declarative table factories capture this image during adoption. A data
+model `{preserveRows=true}` updates chrome/layout without resetting the provider,
+which lets a consumer defer a full refresh while retaining an active gesture.

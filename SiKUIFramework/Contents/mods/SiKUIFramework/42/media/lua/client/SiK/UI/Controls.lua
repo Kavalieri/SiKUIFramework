@@ -1293,8 +1293,9 @@ function Controls.search(parent, options)
 		return emitChange(self)
 	end
 	function panel:submit() return submit(self) end
-	function panel:setBounds(x, y, width, height)
-		self:setX(x); self:setY(y); self:setWidth(width); self:setHeight(height)
+	local function layoutSearch(self)
+		if not self.entry then return end
+		local width,height=self.width,self.height
 		local actionW = showButton and height or 0
 		self.entry:setX(0); self.entry:setY(0)
 		self.entry:setWidth(math.max(1, width - actionW - buttonGap)); self.entry:setHeight(height)
@@ -1302,6 +1303,18 @@ function Controls.search(parent, options)
 			self.action:setX(width - actionW); self.action:setY(0)
 			self.action:setWidth(actionW); self.action:setHeight(height)
 		end
+	end
+	local searchSetWidth,searchSetHeight=panel.setWidth,panel.setHeight
+	function panel:setWidth(width)
+		searchSetWidth(self,math.max(1,n(width,self.width))); layoutSearch(self)
+		return self
+	end
+	function panel:setHeight(height)
+		searchSetHeight(self,math.max(1,n(height,self.height))); layoutSearch(self)
+		return self
+	end
+	function panel:setBounds(x, y, width, height)
+		self:setX(x); self:setY(y); self:setWidth(width); self:setHeight(height)
 		return self
 	end
 	return attach(parent, panel)

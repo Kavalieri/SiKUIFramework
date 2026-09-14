@@ -19,7 +19,7 @@ matrix. No visual constructor is shared or server-side.
 The framework currently has two independent version axes:
 
 - `SiK.UI.Version.string()` and `mod.info` report the runtime/mod version
-  `1.0.3`.
+  `1.0.4-dev1`.
 - The catalog manifest reports `manifestVersion=0.1.0-preview`. Generated
   surface `frameworkRef.manifestVersion` pins this manifest contract, not the
   runtime/mod release number.
@@ -582,3 +582,12 @@ terminal content slots. Direct framework consumers may override semantic colour
 when a distinct state requires it. Declarative product surfaces do not receive
 visual or spacing overrides: their layout supplies parentage and available
 space, and the framework derives placement, gaps and padding automatically.
+
+### Ordered tables
+
+Table's opt-in `keyedComparator` / `patchRoots` path uses `OrderedBlocks`, a
+persistent AVL of root blocks with projected-row counts. VirtualList resolves
+viewport indices through the provider. Complete row arrays are explicit reads,
+not the refresh mechanism. Root values are immutable, patches are transactional,
+and nested row writers are rejected before mutation. See SIK_UI_API.md for
+capture/restore and declarative `preserveRows` contracts.
