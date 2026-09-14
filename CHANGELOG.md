@@ -3,6 +3,18 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
+## 1.0.4 - 2026-09-14
+
+### Added
+
+- Ordered root providers and keyed row updates for consumers that publish partial table changes.
+
+### Improved and fixed
+
+- Search controls recompute their entry and action geometry when resized while preserving text, focus and selection.
+- Virtual lists and tables retain ordering, selection, expansion, pagination and scroll across targeted updates.
+- Quantity columns retain their approved right padding and grouped rows can carry deterministic shared or mixed state metadata.
+
 ## 1.0.2 - 2026-09-11
 
 ### Added

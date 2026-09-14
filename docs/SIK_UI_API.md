@@ -228,7 +228,7 @@ owning handle documents its reflow/update and disposal path.
 
 Runtime and declarative compatibility use different identifiers:
 
-- `SiK.UI.Version` and `mod.info` identify runtime `1.0.4-dev1`.
+- `SiK.UI.Version` and `mod.info` identify runtime `1.0.4`.
 - `catalog/manifests/sik-ui-framework.manifest.json` identifies manifest
   `0.1.0-preview`; generated `frameworkRef.manifestVersion` pins that value.
 
@@ -650,7 +650,7 @@ image remains current. It returns `false, "image_superseded"` after a newer row
 publication. This lets a consumer keep the undo only for the duration of its own
 transaction and prevents an older failure from overwriting newer UI state.
 
-### Search resize contract (1.0.4-dev1)
+### Search resize contract (1.0.4)
 
 `Controls.search` supports `setBounds`, `setWidth` and `setHeight` on the returned
 panel. Each updates the existing editable entry and optional action button to
@@ -659,7 +659,7 @@ selection; it does not emit a text-change callback. Disposal remains idempotent.
 This fixes direct width/height consumers such as terminal search and rule fields.
 No changes to the independent component-manifest schema are required.
 
-### Ordered root provider (1.0.4-dev1)
+### Ordered root provider (1.0.4)
 
 `Table.create({keyedComparator=function(a,b) ... end, ...})` opts into immutable
 root data and a persistent ordered tree. The comparator must be deterministic
