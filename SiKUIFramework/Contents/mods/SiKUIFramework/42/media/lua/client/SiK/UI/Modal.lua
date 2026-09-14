@@ -379,21 +379,25 @@ function Modal.fitContent(panel, contentHeight, options)
                         panel.contentBlock:setContentHeight(value)
                 end
                 local desired = desiredHeight(value)
+                local overrides = {
+                        width = panel.width, height = desired,
+                        environment = options.environment,
+                }
                 if options.center == true then
-                        local bounds = SiK.UI.Window.resolveBounds({
-                                playerNum = panel.playerNum,
-                                profile = panel._sikWindowOptions and panel._sikWindowOptions.profile,
-                                width = panel.width, height = desired,
-                                environment = options.environment,
-                        })
-                        panel:setX(bounds.x); panel:setY(bounds.y)
-                        panel:setSize(bounds.w, bounds.h)
-                else
-                        SiK.UI.Window.updateConstraints(panel, {
-                                width = panel.width, height = desired,
-                                environment = options.environment,
-                        })
+                        -- Center the final constrained size, including the
+                        -- consumer's limits and viewport, before one reflow.
+                        local candidate = {}
+                        for key, entry in pairs(panel._sikWindowOptions or {}) do
+                                candidate[key] = entry
+                        end
+                        candidate.x, candidate.y = nil, nil
+                        candidate.w, candidate.h = panel.width, desired
+                        candidate.playerNum = panel.playerNum
+                        if options.environment ~= nil then candidate.environment = options.environment end
+                        local bounds = SiK.UI.Window.resolveBounds(candidate)
+                        overrides.x, overrides.y = bounds.x, bounds.y
                 end
+                SiK.UI.Window.updateConstraints(panel, overrides)
                 return desired
         end
         -- A wrapped dialogue can gain or lose a scrollbar after Window clamps it to

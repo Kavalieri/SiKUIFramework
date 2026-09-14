@@ -133,6 +133,14 @@ once only after the Modal has synchronized its content Block or dock host.
 `context.value` is therefore the final Modal content rectangle suitable for
 consumer layout; the callback is not emitted during Modal construction.
 
+`Modal.fitContent(panel, height, options)` preserves the panel's current size
+limits, safe margin and viewport. With `center=true`, it centers the final
+constrained dimensions; otherwise it preserves the accessible position.
+Each complete geometry pass emits one `onReflow` after the host is resized.
+Stable content takes one pass. A dialogue whose measured height changes during
+layout may take up to three passes; callbacks must remain layout-only and may
+update that measurement without triggering data queries or business actions.
+
 `Popover.attach(control, {owner=optionalWindow, playerNum=optionalPlayer, ...})`
 resolves the top ancestor as its default owner at open time. A supplied player
 must match that owner. Transients inherit native top-layer priority, follow
