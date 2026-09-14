@@ -27,12 +27,13 @@ function WorldPicker.create(options)
 		end
 		return SiK.UI.Namespace.context(self, options, phase, point)
 	end
-	local refresh = SiK.UI.Lifecycle.bindVisibleRefresh(panel, {
+	local refresh, refreshReason = SiK.UI.Lifecycle.bindVisibleRefresh(panel, {
 		active = false, intervalTicks = options.intervalTicks,
 		refresh = function(ctx)
 			if type(options.onRefresh) == "function" then options.onRefresh(ctx) end
 		end,
 	})
+	if not refresh then return nil, refreshReason end
 	local function snapshotSteps()
 		local snapshot = {}
 		for index = 1, #steps do snapshot[index] = steps[index] end
@@ -43,12 +44,13 @@ function WorldPicker.create(options)
 		if self.setCapture then self:setCapture(false) end
 	end
 	local function hideResolved(self, phase)
+		if self._sikDisposed then return end
 		if (phase == "cancel" or options.keepOpen ~= true) and self.setVisible then
 			self:setVisible(false)
 		end
 	end
 	local function stop(self, phase, x, y, reason)
-		if resolved then return false end
+		if resolved or self._sikDisposed then return false end
 		if phase ~= "cancel" and not self._sikPicking then return false end
 		resolved = true
 		releaseCapture(self)
@@ -70,7 +72,7 @@ function WorldPicker.create(options)
 	end
 	local function complete(self, result)
 		if not multiStep then return nil, "not_multi_step" end
-		if resolved then return false end
+		if resolved or self._sikDisposed then return false end
 		resolved = true
 		releaseCapture(self)
 		if type(options.onConfirm) == "function" then
@@ -81,6 +83,7 @@ function WorldPicker.create(options)
 		return true
 	end
 	function panel:onMouseDown(x, y)
+		if self._sikDisposed then return false end
 		if resolved then
 			if options.keepOpen ~= true then return false end
 			resolved = false
@@ -102,12 +105,16 @@ function WorldPicker.create(options)
 		if not self._sikPicking then return false end
 		releaseCapture(self)
 		local point = context(self, "step", x, y).value
+		if resolved or self._sikDisposed then return false end
 		steps[#steps + 1] = point
 		local result = nil
 		if type(options.onStep) == "function" then
 			result = options.onStep(SiK.UI.Namespace.context(self, options, "step",
 				{ point = point, stepIndex = #steps, steps = snapshotSteps() }))
 		end
+		-- A consumer may finish its work and dispose/cancel this picker inside
+		-- onStep. Do not complete it again after its resources have been released.
+		if resolved or self._sikDisposed then return true end
 		local completeNow = result == "complete"
 			or (type(result) == "table" and result.complete == true)
 			or (tonumber(options.stepsRequired) and #steps >= math.max(1,
@@ -147,6 +154,9 @@ function WorldPicker.create(options)
 	function panel:dispose()
 		if self._sikDisposed then return false end
 		self._sikDisposed = true
+		resolved = true
+		self._sikPicking = false
+		for index = #steps, 1, -1 do steps[index] = nil end
 		if focus then focus:dispose(); focus = nil end
 		if refresh then refresh:dispose(); refresh = nil end
 		if self.setCapture then self:setCapture(false) end

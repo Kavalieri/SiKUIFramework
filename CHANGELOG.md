@@ -3,6 +3,11 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
+## 1.0.5-dev1 - 2026-09-14
+
+- WorldPicker supports disposal from selection callbacks without completing twice or retaining capture, refresh subscriptions or focus leases.
+- Failed refresh binding is reported before returning a usable picker.
+
 ## 1.0.4 - 2026-09-14
 
 ### Added
