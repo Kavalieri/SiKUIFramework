@@ -3,7 +3,7 @@ require "SiK/UI/Namespace"
 local Version = SiK.UI.Version or {
 	major = 1,
 	minor = 0,
-	patch = 4,
+	patch = 5,
 	stage = "",
 }
 

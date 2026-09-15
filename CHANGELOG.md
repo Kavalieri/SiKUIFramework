@@ -3,10 +3,15 @@
 All entries describe repository contents, not in-game certification of a
 consumer surface.
 
-## 1.0.5-dev1 - 2026-09-14
+## 1.0.5 - 2026-09-15
+
+### Improved and fixed
 
 - WorldPicker supports disposal from selection callbacks without completing twice or retaining capture, refresh subscriptions or focus leases.
-- Failed refresh binding is reported before returning a usable picker.
+- Modal content reflows against its final constrained bounds without duplicate callbacks.
+- Form layout hosts remain transparent, so spacing between controls is not painted as an extra framed element.
+- Popovers and combo lists follow their owner and ancestor movement, remain inside the nearest modal and close safely when no complete row fits.
+- Multiline tooltips use the same wrapped measurement and render paths, including CRLF and blank lines.
 
 ## 1.0.4 - 2026-09-14
 
