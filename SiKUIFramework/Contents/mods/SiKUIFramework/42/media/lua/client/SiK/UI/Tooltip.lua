@@ -45,7 +45,11 @@ local function wrap(value, width, font)
                 end
                 return chunk
         end
-        for word in text:gmatch("%S+") do
+        -- Explicit document lines are hard breaks, including empty lines.
+        text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+        for paragraph in (text .. "\n"):gmatch("(.-)\n") do
+        current = ""
+        for word in paragraph:gmatch("%S+") do
                 local candidate = current == "" and word or current .. " " .. word
                 if current ~= "" and not fits(candidate) then
                         lines[#lines + 1], current = current, ""
@@ -53,7 +57,8 @@ local function wrap(value, width, font)
                 if current == "" and not fits(word) then current = appendLongToken(word)
                 else current = current == "" and word or current .. " " .. word end
         end
-	if current ~= "" or #lines == 0 then lines[#lines + 1] = current end
+	lines[#lines + 1] = current
+        end
 	return lines
 end
 
@@ -82,12 +87,13 @@ function Tooltip.measureSection(section, width, options)
 	local lineHeight = manager and manager.getFontHeight and manager:getFontHeight(font) or 18
 	local innerWidth = math.max(1, (tonumber(width) or 240) - paddingX * 2)
 	local title = tostring(section.title or "")
+	local titleLines = title ~= "" and wrap(title, innerWidth, font) or {}
 	local lines = sectionLines(section, innerWidth, font)
 	local height = paddingY * 2 + #lines * lineHeight
-	if title ~= "" then height = height + lineHeight + (#lines > 0 and gap or 0) end
+	if title ~= "" then height = height + #titleLines * lineHeight + (#lines > 0 and gap or 0) end
 	return { width = tonumber(width) or 240, height = height, innerWidth = innerWidth,
 		padding = padding, paddingX = paddingX, paddingY = paddingY, gap = gap,
-		lineHeight = lineHeight, title = title, lines = lines, font = font }
+		lineHeight = lineHeight, title = title, titleLines = titleLines, lines = lines, font = font }
 end
 
 -- Object sections are data for an already-owned InventoryItem tooltip host.
@@ -150,8 +156,11 @@ function Tooltip.renderSection(panel, section, x, y, width, options)
 		end
 	end
 	if measured.title ~= "" then
-		draw(measured.title, cursor, color)
-		cursor = cursor + measured.lineHeight + (#measured.lines > 0 and measured.gap or 0)
+		for _, line in ipairs(measured.titleLines) do
+			draw(line, cursor, color)
+			cursor = cursor + measured.lineHeight
+		end
+		cursor = cursor + (#measured.lines > 0 and measured.gap or 0)
 	end
 	for _, line in ipairs(measured.lines) do
 		draw(line, cursor, lineColor)

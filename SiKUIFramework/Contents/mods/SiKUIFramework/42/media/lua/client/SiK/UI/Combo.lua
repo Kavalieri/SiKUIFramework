@@ -97,7 +97,7 @@ local function createPopup(owner, options)
 		and type(SiK.UI.Controls.search) == "function"
 	local inputHeight = searchable and rowHeight or 0
 	local entries = visibleEntries(owner, "")
-	local safe = SiK.UI.Viewport.safe(owner.playerNum, options.environment, 8)
+	local safe = SiK.UI.Popover.availableBounds(owner, options)
 	local popupWidth = math.max(1, math.min(owner.width, safe.w))
 	local maximumRows = math.max(1, math.floor(math.max(0, safe.h - inputHeight - 2) / rowHeight))
 	local visibleRows = math.max(1, math.min(#entries, maxRows, maximumRows))
@@ -124,7 +124,16 @@ local function createPopup(owner, options)
 	end
 
 	function popup:visibleRowCount()
-		return math.max(1, math.floor((self.height - inputHeight - 2) / self.rowHeight))
+		return math.max(0, math.floor((self.height - inputHeight - 2) / self.rowHeight))
+	end
+	function popup:fitPopoverBounds(bounds)
+		if bounds.h < inputHeight + rowHeight + 2 then return false end
+		local rows = math.max(1, math.min(#self._sikVisibleEntries, maxRows))
+		self:setWidth(math.max(1, math.min(self.owner.width, bounds.w)))
+		self:setHeight(math.max(1, math.min(inputHeight + rows * rowHeight + 2, bounds.h)))
+		if self.search and self.search.setWidth then self.search:setWidth(self.width) end
+		self.offset = math.min(self.offset, math.max(0, #self._sikVisibleEntries - self:visibleRowCount()))
+		return true
 	end
 
 	function popup:rebuildVisible(query)
@@ -193,6 +202,7 @@ local function createPopup(owner, options)
 	function popup:onMouseUp(_, y)
 		if y < inputHeight then return true end
 		local row = math.floor((y - inputHeight - 1) / self.rowHeight) + 1
+		if row < 1 or row > self:visibleRowCount() or y >= self.height - 1 then return true end
 		local index = self.offset + row
 		local entry = self._sikVisibleEntries[index]
 		if entry and not entry.heading and not entry.disabled then
@@ -343,7 +353,7 @@ function Combo.create(options)
 	function panel:setEnable(value) return self:setEnabled(value) end
 
 	panel._sikPopover = SiK.UI.Popover.attach(panel, {
-		trigger = "click", gap = 4, playerNum = panel.playerNum,
+		trigger = "click", gap = 4, playerNum = panel.playerNum, environment = options.environment,
 		factory = function() return createPopup(panel, options) end,
 	})
         local baseMouseUp = panel.onMouseUp

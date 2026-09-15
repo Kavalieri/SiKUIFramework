@@ -39,10 +39,10 @@ function Form.create(options)
 	local panel = ISPanel:new(options.x or 0, options.y or 0,
 		options.w or options.width or 1, options.h or options.height or 1)
 	panel:initialise()
-	panel.drawBackground = options.variant == "inline"
-	panel.backgroundColor = panel.drawBackground
-		and SiK.UI.Theme.color("surface", options.theme)
-		or { r = 0, g = 0, b = 0, a = 0 }
+	-- A form arranges controls; their own chrome owns the visible surface.
+	-- Painting the inline host also paints the empty gaps between controls.
+	panel.drawBackground = false
+	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	options.parent:addChild(panel)
 	local instance = { panel = panel, parent = options.parent, options = options,

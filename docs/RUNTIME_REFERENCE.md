@@ -310,6 +310,8 @@ Controls kind such as `field`, `combo` or `toggle`. A descriptor can supply
 `label`, `default`, `items`, `placeholder`, `tooltip`, `payload`, `onChange`
 and `validate(value, allValues, descriptor)`. `submit()` calls `validate()`
 before `onSubmit`.
+The form host is transparent, including the `inline` variant. Controls own
+their chrome; gaps between fields remain empty and keep their layout width.
 
 `Card.create` accepts named terminal slots such as `{ parent, bounds, icon,
 title, value, description, status, statusTone, payload, tooltip, onActivate }`.
@@ -591,3 +593,5 @@ viewport indices through the provider. Complete row arrays are explicit reads,
 not the refresh mechanism. Root values are immutable, patches are transactional,
 and nested row writers are rejected before mutation. See SIK_UI_API.md for
 capture/restore and declarative `preserveRows` contracts.
+
+Detached popovers follow control and ancestor movement/reflow and close when an ancestor is hidden or disposed. Combo popups fit the nearest modal content and choose available space above or below their anchor. When search plus one complete option cannot fit, opening returns `insufficient_space` and an active popup closes; it never selects a clipped row.

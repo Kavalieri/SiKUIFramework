@@ -20,13 +20,14 @@ local function bindOwner(owner, handle)
 	if not binding then
 		binding = { handles = {}, originals = {}, wrappers = {} }
 		ownerBindings[owner] = binding
-		for _, method in ipairs({ "setVisible", "removeFromUIManager", "dispose", "bringToTop" }) do
+		for _, method in ipairs({ "setVisible", "removeFromUIManager", "dispose", "bringToTop", "reflow", "setX", "setY" }) do
 			local original = owner[method]
 			if type(original) == "function" then
 				binding.originals[method] = original
 				local wrapper = function(self, ...)
 					local args = { ... }
-					if method ~= "bringToTop" and (method ~= "setVisible" or args[1] == false) then
+					if method == "removeFromUIManager" or method == "dispose"
+						or (method == "setVisible" and args[1] == false) then
 						local snapshot = {}
 						for index = 1, #binding.handles do snapshot[index] = binding.handles[index] end
 						for index = 1, #snapshot do snapshot[index]:close("owner-" .. method) end
@@ -37,6 +38,10 @@ local function bindOwner(owner, handle)
 							local widget = binding.handles[index]:getActive()
 							if widget and widget.bringToTop then widget:bringToTop() end
 						end
+					elseif method == "reflow" or method == "setX" or method == "setY" then
+						local snapshot = {}
+						for index = 1, #binding.handles do snapshot[index] = binding.handles[index] end
+						for index = 1, #snapshot do snapshot[index]:reposition() end
 					end
 					return result
 				end
@@ -68,6 +73,29 @@ local function boundsOf(control, options)
 	return { x = x, y = y, w = control.width or 0, h = control.height or 0 }
 end
 
+-- Detached native popups still belong to the nearest modal's content bounds.
+-- Ordinary controls retain the viewport contract. Factories use the same rect
+-- to size content before the popover places it.
+function Popover.availableBounds(control, options)
+	options = options or {}
+	local safe = SiK.UI.Viewport.safe(options.playerNum or control.playerNum or 0,
+		options.environment, tonumber(options.safeMargin) or 8)
+	local ancestor = control
+	while ancestor do
+		if ancestor._sikModal and ancestor.contentRect then
+			local rect = ancestor:contentRect()
+			local x = (ancestor.getAbsoluteX and ancestor:getAbsoluteX() or ancestor.x or 0) + rect.x
+			local y = (ancestor.getAbsoluteY and ancestor:getAbsoluteY() or ancestor.y or 0) + rect.y
+			local right, bottom = math.min(safe.x + safe.w, x + rect.w), math.min(safe.y + safe.h, y + rect.h)
+			safe.x, safe.y = math.max(safe.x, x), math.max(safe.y, y)
+			safe.w, safe.h = math.max(1, right - safe.x), math.max(1, bottom - safe.y)
+			break
+		end
+		ancestor = ancestor.parent
+	end
+	return safe
+end
+
 function Popover.attach(control, options)
 	if type(control) ~= "table" then return nil, "invalid_control" end
 	options = options or {}
@@ -80,10 +108,12 @@ function Popover.attach(control, options)
 	local previousUp, previousMove = control.onMouseUp, control.onMouseMove
 	local previousOutside = control.onMouseMoveOutside
 	local active, focus, disposed, owner = nil, nil, false, nil
+	local ancestors = {}
 	local handle = { control = control, playerNum = options.playerNum or 0 }
 	local function close(reason)
 		if not active then return false end
-		unbindOwner(owner, handle); owner = nil
+		for index = 1, #ancestors do unbindOwner(ancestors[index], handle) end
+		ancestors = {}; owner = nil
 		if focus then focus:dispose(); focus = nil end
 		active._sikFocusOwner = nil
 		if active.setVisible then active:setVisible(false) end
@@ -96,13 +126,28 @@ function Popover.attach(control, options)
 		return true
 	end
 	local function position(widget)
-		local anchor, safe = boundsOf(control, options), SiK.UI.Viewport.safe(handle.playerNum,
-			options.environment, tonumber(options.safeMargin) or 8)
+		local anchor, safe = boundsOf(control, options), Popover.availableBounds(control, {
+			playerNum = handle.playerNum, environment = options.environment, safeMargin = options.safeMargin })
+		if widget.fitPopoverBounds and widget:fitPopoverBounds(safe) == false then return nil end
 		local gap, width, height = tonumber(options.gap) or 8, widget.width or 0, widget.height or 0
+		local side = options.side
+		if widget.fitPopoverBounds and side ~= "before" and side ~= "after" then
+			local below = math.max(0, safe.y + safe.h - math.max(safe.y, anchor.y + anchor.h + gap))
+			local above = math.max(0, math.min(safe.y + safe.h, anchor.y - gap) - safe.y)
+			local preferAbove = side == "above"
+			local preferred, opposite = preferAbove and above or below, preferAbove and below or above
+			if preferred < height and opposite > preferred then preferAbove = not preferAbove end
+			side = preferAbove and "above" or "below"
+			local available = preferAbove and above or below
+			if available > 0 then
+				if widget:fitPopoverBounds({x=safe.x,y=safe.y,w=safe.w,h=available}) == false then return nil end
+				width, height = widget.width or 0, widget.height or 0
+			end
+		end
 		local x, y = anchor.x, anchor.y + anchor.h + gap
-		if options.side == "before" then x, y = anchor.x - width - gap, anchor.y
-		elseif options.side == "after" then x, y = anchor.x + anchor.w + gap, anchor.y
-		elseif options.side == "above" then y = anchor.y - height - gap end
+		if side == "before" then x, y = anchor.x - width - gap, anchor.y
+		elseif side == "after" then x, y = anchor.x + anchor.w + gap, anchor.y
+		elseif side == "above" then y = anchor.y - height - gap end
 		x = math.max(safe.x, math.min(x, safe.x + safe.w - width))
 		y = math.max(safe.y, math.min(y, safe.y + safe.h - height))
 		if widget.setX then widget:setX(x) else widget.x = x end
@@ -111,11 +156,18 @@ function Popover.attach(control, options)
 	end
 	local function open()
 		if disposed then return nil, "disposed" end
-		if active then position(active); return active end
+		if active then return handle:reposition() end
 		owner = rootOf(control, options.owner)
 		if not owner or owner._sikDisposed or owner._sikOwnedDisposed
 			or (owner.getIsVisible and owner:getIsVisible() == false) then
 			return nil, "owner_unavailable"
+		end
+		local ancestor = control
+		while ancestor do
+			if ancestor._sikDisposed or ancestor._sikOwnedDisposed
+				or ancestor.visible == false
+				or (ancestor.getIsVisible and ancestor:getIsVisible() == false) then return nil, "owner_unavailable" end
+			ancestor = ancestor.parent
 		end
 		handle.playerNum = math.max(0, math.floor(tonumber(owner.playerNum or options.playerNum) or 0))
 		if options.playerNum ~= nil and options.playerNum ~= handle.playerNum then
@@ -125,14 +177,21 @@ function Popover.attach(control, options)
 		local ok, widget = pcall(options.factory,
 			SiK.UI.Namespace.context(control, options, "open"))
 		if not ok or type(widget) ~= "table" then return nil, "factory_failed" end
-		active = widget; position(active)
+		active = widget
+		if not position(active) then close("insufficient_space"); return nil, "insufficient_space" end
 		active.playerNum = handle.playerNum
 		active._sikFocusOwner = owner
 		if active.setAlwaysOnTop then active:setAlwaysOnTop(true) end
 		if active.addToUIManager then active:addToUIManager() end
 		if active.setVisible then active:setVisible(true) end
 		if active.bringToTop then active:bringToTop() end
-		bindOwner(owner, handle)
+		local bound = {}
+		ancestor = control
+		while ancestor do
+			ancestors[#ancestors + 1] = ancestor; bound[ancestor] = true
+			bindOwner(ancestor, handle); ancestor = ancestor.parent
+		end
+		if not bound[owner] then ancestors[#ancestors + 1] = owner; bindOwner(owner, handle) end
 		if focusEnabled then
 			focus = SiK.UI.FocusStack.install(active, function() close("escape"); return true end,
 				{ playerNum = handle.playerNum, priority = SiK.UI.FocusStack.PRIORITY.TRANSIENT })
@@ -164,7 +223,11 @@ function Popover.attach(control, options)
 	function handle:open() return open() end
 	function handle:close(reason) return close(reason or "explicit") end
 	function handle:toggle() if active then close("toggle"); return nil end; return open() end
-	function handle:reposition() return active and position(active) or nil end
+	function handle:reposition()
+		if not active then return nil end
+		if not position(active) then close("insufficient_space"); return nil, "insufficient_space" end
+		return active
+	end
 	function handle:getActive() return active end
 	function handle:dispose()
 		if disposed then return false end
